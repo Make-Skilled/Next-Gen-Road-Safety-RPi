@@ -159,6 +159,16 @@ def detection_thread():
     """Thread for object detection"""
     global latest_frame, latest_detections, frame_count, last_processing_time, latest_processed_frame
     
+    # Get default user for detections
+    default_user = None
+    try:
+        with app.app_context():
+            default_user = User.query.first()
+            if default_user is None:
+                print("Warning: No default user found for detections")
+    except Exception as e:
+        print(f"Error getting default user: {e}")
+    
     while True:
         try:
             if not detection_enabled:
@@ -257,16 +267,29 @@ def detection_thread():
                 
                 # Save to database less frequently
                 if detections and time.time() - last_processing_time > 2.0:
-                    with app.app_context():
-                        for detection in detections:
-                            new_detection = Detection(
-                                object_name=detection['object_name'],
-                                confidence=detection['confidence'],
-                                user_id=current_user.id if current_user else None
-                            )
-                            db.session.add(new_detection)
-                        db.session.commit()
-                    last_processing_time = time.time()
+                    try:
+                        with app.app_context():
+                            if default_user:  # Only save if we have a default user
+                                for detection in detections:
+                                    try:
+                                        new_detection = Detection(
+                                            object_name=detection['object_name'],
+                                            confidence=detection['confidence'],
+                                            user_id=default_user.id
+                                        )
+                                        db.session.add(new_detection)
+                                    except Exception as e:
+                                        print(f"Error adding detection: {e}")
+                                        continue
+                                
+                                try:
+                                    db.session.commit()
+                                    last_processing_time = time.time()
+                                except Exception as e:
+                                    print(f"Error committing detections: {e}")
+                                    db.session.rollback()
+                    except Exception as e:
+                        print(f"Error in database operation: {e}")
                 
             except Exception as e:
                 print(f"Error processing detection: {e}")
