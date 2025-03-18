@@ -54,31 +54,42 @@ class ObjectDetector:
                 self.camera.release()
                 time.sleep(1)  # Wait for camera to fully release
                 
-            # Try to open the camera
-            self.camera = cv2.VideoCapture(0, cv2.CAP_V4L)
-            if not self.camera.isOpened():
-                print("Failed to open camera, trying alternative method...")
-                self.camera = cv2.VideoCapture(0)  # Try without CAP_V4L
-                if not self.camera.isOpened():
-                    raise Exception("Failed to open camera with both methods")
-                
-            # Set camera properties
-            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.camera.set(cv2.CAP_PROP_FPS, 30)
-            self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-            self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Auto exposure
+            # Try different camera indices
+            for index in [0, 1, -1]:
+                try:
+                    print(f"Trying to open camera with index {index}...")
+                    self.camera = cv2.VideoCapture(index)
+                    
+                    if self.camera.isOpened():
+                        # Set camera properties
+                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        self.camera.set(cv2.CAP_PROP_FPS, 30)
+                        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+                        self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Auto exposure
+                        
+                        # Wait for camera to initialize
+                        time.sleep(2)
+                        
+                        # Test camera
+                        ret, frame = self.camera.read()
+                        if ret:
+                            print(f"Successfully opened camera with index {index}")
+                            return True
+                        else:
+                            print(f"Could not read from camera with index {index}")
+                            self.camera.release()
+                            self.camera = None
+                    else:
+                        print(f"Failed to open camera with index {index}")
+                except Exception as e:
+                    print(f"Error trying camera index {index}: {e}")
+                    if self.camera is not None:
+                        self.camera.release()
+                        self.camera = None
+                    
+            raise Exception("Failed to open camera with any available index")
             
-            # Wait for camera to initialize
-            time.sleep(2)
-            
-            # Test camera
-            ret, frame = self.camera.read()
-            if not ret:
-                raise Exception("Could not read from camera")
-                
-            print("Camera initialized successfully")
-            return True
         except Exception as e:
             print(f"Error initializing camera: {e}")
             if self.camera is not None:
