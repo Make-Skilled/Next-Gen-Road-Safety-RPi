@@ -23,8 +23,10 @@ login_manager.login_view = 'login'
 
 # Global variables for detection settings
 confidence_threshold = 0.3
-frame_skip = 2  # Process every nth frame to reduce CPU load
+frame_skip = 4  # Process every 4th frame to reduce CPU load
 frame_count = 0
+last_processing_time = 0
+min_processing_interval = 0.1  # Minimum time between processing frames (100ms)
 
 # Load YOLOv8 model
 try:
@@ -78,10 +80,9 @@ def check_system_resources():
     return True
 
 def detect_objects(frame):
-    global frame_count
+    global frame_count, last_processing_time
     
     if frame is None:
-        print("Frame is None in detect_objects")
         return None, []
         
     # Skip frames to reduce CPU load
@@ -89,6 +90,11 @@ def detect_objects(frame):
     if frame_count % frame_skip != 0:
         return frame, []
         
+    # Check if enough time has passed since last processing
+    current_time = time.time()
+    if current_time - last_processing_time < min_processing_interval:
+        return frame, []
+    
     height, width = frame.shape[:2]
     
     try:
@@ -97,7 +103,7 @@ def detect_objects(frame):
             return frame, []
             
         # Resize frame for faster processing
-        frame_resized = cv2.resize(frame, (320, 320))
+        frame_resized = cv2.resize(frame, (256, 256))  # Reduced size for faster processing
         
         # Run YOLOv8 inference with optimizations
         results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
@@ -114,10 +120,10 @@ def detect_objects(frame):
             class_name = results.names[class_id]
             
             # Scale coordinates back to original frame size
-            x1 = int(x1 * width / 320)
-            y1 = int(y1 * height / 320)
-            x2 = int(x2 * width / 320)
-            y2 = int(y2 * height / 320)
+            x1 = int(x1 * width / 256)
+            y1 = int(y1 * height / 256)
+            x2 = int(x2 * width / 256)
+            y2 = int(y2 * height / 256)
             
             # Ensure coordinates are within frame bounds
             x1 = max(0, min(x1, width))
@@ -143,6 +149,7 @@ def detect_objects(frame):
             }
             detections.append(detection)
         
+        last_processing_time = current_time
         return frame, detections
         
     except Exception as e:
@@ -161,14 +168,14 @@ def get_camera_frame():
         # Set camera properties for Raspberry Pi
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        camera.set(cv2.CAP_PROP_FPS, 15)  # Reduced FPS for better performance
+        camera.set(cv2.CAP_PROP_FPS, 10)  # Reduced FPS for better performance
+        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer size
         
         # Read frame
         ret, frame = camera.read()
         camera.release()  # Release camera immediately after reading
         
         if not ret:
-            print("Failed to read frame")
             return None, []
             
         # Flip the frame horizontally for a later selfie-view display
@@ -183,34 +190,35 @@ def get_camera_frame():
         return None, []
 
 def gen_frames(user_id):
-    while True:
-        try:
-            frame, detections = get_camera_frame()
-            
-            if frame is not None:
-                # Save detections to database if user_id is provided
-                if user_id and detections:
-                    for detection in detections:
-                        new_detection = Detection(
-                            object_name=detection['object_name'],
-                            confidence=detection['confidence'],
-                            user_id=user_id
-                        )
-                        db.session.add(new_detection)
-                    db.session.commit()
+    # Create a new application context for this thread
+    with app.app_context():
+        while True:
+            try:
+                frame, detections = get_camera_frame()
+                
+                if frame is not None:
+                    # Save detections to database if user_id is provided
+                    if user_id and detections:
+                        for detection in detections:
+                            new_detection = Detection(
+                                object_name=detection['object_name'],
+                                confidence=detection['confidence'],
+                                user_id=user_id
+                            )
+                            db.session.add(new_detection)
+                        db.session.commit()
 
-                # Convert frame to JPEG
-                ret, buffer = cv2.imencode('.jpg', frame)
-                if ret:
-                    frame = buffer.tobytes()
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            else:
-                print("No frame received, waiting...")
-                time.sleep(0.5)
-        except Exception as e:
-            print(f"Error in gen_frames: {e}")
-            time.sleep(1)
+                    # Convert frame to JPEG with reduced quality
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    if ret:
+                        frame = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                else:
+                    time.sleep(0.1)  # Reduced sleep time
+            except Exception as e:
+                print(f"Error in gen_frames: {e}")
+                time.sleep(0.5)  # Reduced error sleep time
 
 # User Model
 class User(UserMixin, db.Model):
