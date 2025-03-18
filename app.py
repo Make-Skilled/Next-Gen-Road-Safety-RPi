@@ -1,10 +1,13 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, Response, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 import cv2
 import datetime
 import os
+from object_detection import ObjectDetector
+import json
+from simple_websocket import Server
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure secret key
@@ -13,6 +16,9 @@ db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# Initialize object detector
+detector = ObjectDetector()
 
 # User Model
 class User(UserMixin, db.Model):
@@ -33,6 +39,29 @@ class Detection(db.Model):
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
+
+def gen_frames():
+    while True:
+        frame, detections = detector.get_frame()
+        if frame is not None:
+            # Save detections to database if user is logged in
+            if current_user.is_authenticated and detections:
+                for detection in detections:
+                    new_detection = Detection(
+                        object_name=detection['object_name'],
+                        confidence=detection['confidence'],
+                        user_id=current_user.id
+                    )
+                    db.session.add(new_detection)
+                db.session.commit()
+
+            # Convert frame to JPEG
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame = buffer.tobytes()
+            
+            # Yield frame for streaming
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 @app.route('/')
 def index():
@@ -93,6 +122,39 @@ def logout():
 @login_required
 def detect():
     return render_template('detect.html')
+
+@app.route('/video_feed')
+@login_required
+def video_feed():
+    return Response(gen_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/update_threshold', methods=['POST'])
+@login_required
+def update_threshold():
+    data = request.get_json()
+    threshold = float(data.get('threshold', 0.5))
+    detector.set_confidence_threshold(threshold)
+    return jsonify({'status': 'success'})
+
+@app.route('/ws/detection')
+@login_required
+def ws_detection():
+    ws = Server(request.environ)
+    try:
+        while True:
+            _, detections = detector.get_frame()
+            if detections:
+                # Send only the latest detection
+                latest = detections[-1]
+                ws.send(json.dumps({
+                    'object_name': latest['object_name'],
+                    'confidence': latest['confidence'],
+                    'timestamp': latest['timestamp'].isoformat()
+                }))
+    except:
+        ws.close()
+    return ''
 
 if __name__ == '__main__':
     with app.app_context():

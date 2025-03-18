@@ -1,1 +1,125 @@
- 
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+        <h2 class="text-2xl font-bold mb-6">Object Detection</h2>
+
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="aspect-w-16 aspect-h-9 mb-6">
+                <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Video Feed" class="rounded-lg w-full h-full object-cover">
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-semibold mb-2">Latest Detection</h3>
+                    <div id="latest-detection" class="text-gray-700">
+                        <p class="text-sm">Waiting for detection...</p>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="text-lg font-semibold mb-2">Detection Settings</h3>
+                    <form id="detection-settings" class="space-y-4">
+                        <div>
+                            <label for="confidence-threshold" class="block text-sm font-medium text-gray-700">
+                                Confidence Threshold
+                            </label>
+                            <input type="range" 
+                                   id="confidence-threshold" 
+                                   name="confidence" 
+                                   min="0" 
+                                   max="100" 
+                                   value="50"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                            <div class="flex justify-between text-xs text-gray-500 mt-1">
+                                <span>0%</span>
+                                <span id="confidence-value">50%</span>
+                                <span>100%</span>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-6 bg-white rounded-lg shadow-md p-6">
+            <h3 class="text-lg font-semibold mb-4">Recent Detections</h3>
+            <div id="recent-detections" class="space-y-2">
+                <!-- Recent detections will be populated here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const confidenceSlider = document.getElementById('confidence-threshold');
+    const confidenceValue = document.getElementById('confidence-value');
+    const latestDetection = document.getElementById('latest-detection');
+    const recentDetections = document.getElementById('recent-detections');
+    
+    // Update confidence threshold display
+    confidenceSlider.addEventListener('input', function() {
+        const value = this.value;
+        confidenceValue.textContent = `${value}%`;
+        
+        // Send threshold update to server
+        fetch('/update_threshold', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                threshold: value / 100
+            })
+        });
+    });
+
+    // WebSocket connection for real-time updates
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/detection`);
+    
+    ws.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        
+        // Update latest detection
+        latestDetection.innerHTML = `
+            <div class="space-y-1">
+                <p class="font-medium">${data.object_name}</p>
+                <p class="text-sm">Confidence: ${(data.confidence * 100).toFixed(1)}%</p>
+                <p class="text-xs text-gray-500">${new Date(data.timestamp).toLocaleTimeString()}</p>
+            </div>
+        `;
+
+        // Add to recent detections
+        const detectionElement = document.createElement('div');
+        detectionElement.className = 'p-2 bg-gray-50 rounded';
+        detectionElement.innerHTML = `
+            <div class="flex justify-between items-center">
+                <div>
+                    <span class="font-medium">${data.object_name}</span>
+                    <span class="text-sm text-gray-500 ml-2">${(data.confidence * 100).toFixed(1)}%</span>
+                </div>
+                <span class="text-xs text-gray-500">${new Date(data.timestamp).toLocaleTimeString()}</span>
+            </div>
+        `;
+        
+        recentDetections.insertBefore(detectionElement, recentDetections.firstChild);
+        
+        // Keep only last 5 detections
+        if (recentDetections.children.length > 5) {
+            recentDetections.removeChild(recentDetections.lastChild);
+        }
+    };
+
+    ws.onerror = function(error) {
+        console.error('WebSocket error:', error);
+    };
+
+    ws.onclose = function() {
+        console.log('WebSocket connection closed');
+    };
+});
+</script>
+{% endblock %} 
