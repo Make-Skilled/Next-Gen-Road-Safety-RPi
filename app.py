@@ -7,7 +7,6 @@ import numpy as np
 import datetime
 import os
 import json
-from simple_websocket import Server
 import time
 import threading
 import atexit
@@ -24,7 +23,6 @@ login_manager.login_view = 'login'
 detector = None
 camera_lock = threading.Lock()
 camera_initialized = False
-camera_index = None  # Store the successful camera index
 
 class ObjectDetector:
     def __init__(self, confidence_threshold=0.5):
@@ -50,46 +48,28 @@ class ObjectDetector:
         
     def _init_camera(self):
         try:
-            # First, try to release any existing camera
             if self.camera is not None:
                 self.camera.release()
-                time.sleep(1)  # Wait for camera to fully release
+                time.sleep(1)
+            
+            # Try to open camera
+            self.camera = cv2.VideoCapture(0)
+            
+            if not self.camera.isOpened():
+                raise Exception("Failed to open camera")
+            
+            # Set camera properties
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            
+            # Test camera
+            ret, frame = self.camera.read()
+            if not ret:
+                raise Exception("Failed to read from camera")
                 
-            # Try different camera indices
-            for index in [0, 1, -1]:
-                try:
-                    print(f"Trying to open camera with index {index}...")
-                    self.camera = cv2.VideoCapture(index)
-                    
-                    if self.camera.isOpened():
-                        # Set camera properties
-                        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                        self.camera.set(cv2.CAP_PROP_FPS, 30)
-                        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-                        self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Auto exposure
-                        
-                        # Wait for camera to initialize
-                        time.sleep(2)
-                        
-                        # Test camera
-                        ret, frame = self.camera.read()
-                        if ret:
-                            print(f"Successfully opened camera with index {index}")
-                            return True
-                        else:
-                            print(f"Could not read from camera with index {index}")
-                            self.camera.release()
-                            self.camera = None
-                    else:
-                        print(f"Failed to open camera with index {index}")
-                except Exception as e:
-                    print(f"Error trying camera index {index}: {e}")
-                    if self.camera is not None:
-                        self.camera.release()
-                        self.camera = None
-                    
-            raise Exception("Failed to open camera with any available index")
+            print("Camera initialized successfully")
+            return True
             
         except Exception as e:
             print(f"Error initializing camera: {e}")
@@ -172,25 +152,14 @@ class ObjectDetector:
     
     def get_frame(self):
         try:
-            # Check if camera needs reinitialization
             if self.camera is None or not self.camera.isOpened():
-                print("Camera not available, attempting to reinitialize...")
                 if not self._init_camera():
-                    print("Failed to reinitialize camera")
                     return None, []
-                    
-            # Try to read frame
+            
             ret, frame = self.camera.read()
             if not ret:
-                print("Failed to grab frame, attempting to reinitialize camera...")
-                if not self._init_camera():
-                    print("Failed to reinitialize camera after frame grab failure")
-                    return None, []
-                ret, frame = self.camera.read()
-                if not ret:
-                    print("Still failed to grab frame after reinitialization")
-                    return None, []
-                    
+                return None, []
+            
             # Flip the frame horizontally for a later selfie-view display
             frame = cv2.flip(frame, 1)
             
@@ -203,13 +172,10 @@ class ObjectDetector:
             return None, []
     
     def release(self):
-        try:
-            if self.camera is not None and self.camera.isOpened():
-                self.camera.release()
-                self.camera = None
-                print("Camera released successfully")
-        except Exception as e:
-            print(f"Error releasing camera: {e}")
+        if self.camera is not None and self.camera.isOpened():
+            self.camera.release()
+            self.camera = None
+            print("Camera released successfully")
 
     def set_confidence_threshold(self, threshold):
         self.confidence_threshold = threshold
@@ -235,91 +201,36 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 def init_detector():
-    global detector, camera_initialized, camera_index
+    global detector, camera_initialized
     try:
-        if detector is not None:
-            # If we already have a working camera, don't reinitialize
-            if detector.camera is not None and detector.camera.isOpened():
-                print("Camera already initialized and working")
-                return True
-                
-            # If we have a previous successful index, try that first
-            if camera_index is not None:
-                print(f"Trying to reinitialize camera with previous successful index {camera_index}")
-                detector.release()
-                time.sleep(1)
-                detector.camera = cv2.VideoCapture(camera_index)
-                if detector.camera.isOpened():
-                    ret, frame = detector.camera.read()
-                    if ret:
-                        print(f"Successfully reinitialized camera with index {camera_index}")
-                        return True
-                    detector.camera.release()
-                    detector.camera = None
-            
-            # If previous index failed or doesn't exist, try all indices
-            print("Trying to find working camera...")
-            for index in [0, 1, -1]:
-                try:
-                    print(f"Trying to open camera with index {index}...")
-                    detector.camera = cv2.VideoCapture(index)
-                    
-                    if detector.camera.isOpened():
-                        # Set camera properties
-                        detector.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                        detector.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                        detector.camera.set(cv2.CAP_PROP_FPS, 30)
-                        detector.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-                        detector.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
-                        
-                        # Wait for camera to initialize
-                        time.sleep(2)
-                        
-                        # Test camera
-                        ret, frame = detector.camera.read()
-                        if ret:
-                            print(f"Successfully opened camera with index {index}")
-                            camera_index = index  # Store the successful index
-                            camera_initialized = True
-                            return True
-                        else:
-                            print(f"Could not read from camera with index {index}")
-                            detector.camera.release()
-                            detector.camera = None
-                    else:
-                        print(f"Failed to open camera with index {index}")
-                except Exception as e:
-                    print(f"Error trying camera index {index}: {e}")
-                    if detector.camera is not None:
-                        detector.camera.release()
-                        detector.camera = None
-            
-            raise Exception("Failed to open camera with any available index")
-            
-        else:
-            # Create new detector if none exists
+        if detector is None:
             detector = ObjectDetector()
             if detector.camera is not None and detector.camera.isOpened():
                 camera_initialized = True
                 return True
-            raise Exception("Failed to initialize detector")
-            
+        elif detector.camera is not None and detector.camera.isOpened():
+            return True
+        else:
+            detector.release()
+            detector = ObjectDetector()
+            if detector.camera is not None and detector.camera.isOpened():
+                camera_initialized = True
+                return True
+        return False
     except Exception as e:
         print(f"Error initializing detector: {e}")
         if detector is not None:
             detector.release()
         detector = None
         camera_initialized = False
-        camera_index = None
         return False
 
 def cleanup_detector():
-    global detector, camera_initialized, camera_index
+    global detector, camera_initialized
     if detector is not None:
         detector.release()
         detector = None
         camera_initialized = False
-        camera_index = None
         print("Detector cleaned up")
 
 # Initialize detector at startup
@@ -359,10 +270,10 @@ def gen_frames():
                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             else:
                 print("No frame received")
-                time.sleep(0.1)  # Small delay before retrying
+                time.sleep(0.1)
         except Exception as e:
             print(f"Error in gen_frames: {e}")
-            time.sleep(1)  # Longer delay on error
+            time.sleep(1)
 
 @app.route('/')
 def index():
@@ -447,28 +358,6 @@ def update_threshold():
     threshold = float(data.get('threshold', 0.5))
     detector.set_confidence_threshold(threshold)
     return jsonify({'status': 'success'})
-
-@app.route('/ws/detection')
-@login_required
-def ws_detection():
-    if detector is None:
-        return "Camera not available", 503
-    ws = Server(request.environ)
-    try:
-        while True:
-            with camera_lock:
-                _, detections = detector.get_frame()
-            if detections:
-                # Send only the latest detection
-                latest = detections[-1]
-                ws.send(json.dumps({
-                    'object_name': latest['object_name'],
-                    'confidence': latest['confidence'],
-                    'timestamp': latest['timestamp'].isoformat()
-                }))
-    except:
-        ws.close()
-    return ''
 
 @app.route('/detect')
 @login_required
