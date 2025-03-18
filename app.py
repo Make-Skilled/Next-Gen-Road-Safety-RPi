@@ -29,13 +29,32 @@ frame_count = 0
 # Load YOLOv8 model
 try:
     print("Loading YOLOv8 model...")
-    model = YOLO('yolov8n.pt')  # Load the smallest YOLOv8 model
+    # Try loading with different approaches
+    try:
+        # First try loading directly
+        model = YOLO('yolov8n.pt')
+    except Exception as e1:
+        print(f"First attempt failed: {e1}")
+        try:
+            # Try downloading the model first
+            from ultralytics import download
+            print("Downloading model...")
+            download(url='https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt', dir='.')
+            model = YOLO('yolov8n.pt')
+        except Exception as e2:
+            print(f"Second attempt failed: {e2}")
+            # Try loading with torch directly
+            import torch
+            print("Loading model with torch...")
+            model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+    
     # Optimize model for inference
-    model.fuse()  # Fuse Conv2d + BatchNorm2d layers
+    if hasattr(model, 'fuse'):
+        model.fuse()  # Fuse Conv2d + BatchNorm2d layers
     print("YOLOv8 model loaded successfully")
 except Exception as e:
     print(f"Error loading YOLOv8 model: {e}")
-    print("Please ensure you have internet connection for first-time model download")
+    print("Please ensure you have internet connection and enough disk space")
     raise
 
 # Load COCO labels
@@ -82,19 +101,33 @@ def detect_objects(frame):
         # Resize frame for faster processing
         frame_resized = cv2.resize(frame, (320, 320))
         
-        # Run YOLOv8 inference with optimizations
-        results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
+        # Run inference based on model type
+        if isinstance(model, YOLO):
+            # YOLOv8 inference
+            results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
+            boxes = results.boxes
+        else:
+            # YOLOv5 inference
+            results = model(frame_resized)
+            boxes = results.xyxy[0]  # Get boxes in xyxy format
         
         # Initialize list for detections
         detections = []
         
         # Process detections
-        for box in results.boxes:
-            # Get box coordinates
-            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            confidence = float(box.conf[0])
-            class_id = int(box.cls[0])
-            class_name = results.names[class_id]
+        for box in boxes:
+            if isinstance(model, YOLO):
+                # YOLOv8 format
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                confidence = float(box.conf[0])
+                class_id = int(box.cls[0])
+                class_name = results.names[class_id]
+            else:
+                # YOLOv5 format
+                x1, y1, x2, y2, conf, cls = box.cpu().numpy()
+                confidence = float(conf)
+                class_id = int(cls)
+                class_name = model.names[class_id]
             
             # Scale coordinates back to original frame size
             x1 = int(x1 * width / 320)
