@@ -21,7 +21,14 @@ class ObjectDetector:
         self.confidence_threshold = confidence_threshold
         self.nms_threshold = 0.3
         
-        # Initialize camera with specific settings for Raspberry Pi
+        # Initialize camera
+        self.camera = None
+        self._init_camera()
+        
+    def _init_camera(self):
+        if self.camera is not None:
+            self.camera.release()
+            
         self.camera = cv2.VideoCapture(0,cv2.CAP_V4L)
         
         # Set camera properties

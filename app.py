@@ -26,10 +26,14 @@ camera_lock = threading.Lock()
 def init_detector():
     global detector
     try:
+        if detector is not None:
+            detector.release()  # Release the camera before reinitializing
         detector = ObjectDetector()
         print("Detector initialized successfully")
     except Exception as e:
         print(f"Error initializing detector: {e}")
+        if detector is not None:
+            detector.release()
         detector = None
 
 # Initialize detector
@@ -150,18 +154,30 @@ def logout():
 @login_required
 def detect():
     global detector
-    if detector is None:
-        init_detector()  # Try to reinitialize the detector
+    try:
         if detector is None:
-            flash('Camera not available. Please check your camera connection.')
-            return redirect(url_for('dashboard'))
-    return render_template('detect.html')
+            init_detector()  # Try to reinitialize the detector
+            if detector is None:
+                flash('Camera not available. Please check your camera connection.')
+                return redirect(url_for('dashboard'))
+        return render_template('detect.html')
+    except Exception as e:
+        print(f"Error in detect route: {e}")
+        flash('Error initializing camera. Please try again.')
+        return redirect(url_for('dashboard'))
 
 @app.route('/video_feed')
 @login_required
 def video_feed():
+    global detector
     if detector is None:
-        return "Camera not available", 503
+        try:
+            init_detector()  # Try to reinitialize the detector
+            if detector is None:
+                return "Camera not available", 503
+        except Exception as e:
+            print(f"Error initializing detector in video_feed: {e}")
+            return "Camera not available", 503
     return Response(gen_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
