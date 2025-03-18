@@ -20,8 +20,8 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 # Global variables for detection settings
-confidence_threshold = 0.5
-nms_threshold = 0.3
+confidence_threshold = 0.3
+nms_threshold = 0.2
 
 # Load YOLO model
 config_path = "yolov3-tiny.cfg"
@@ -50,7 +50,19 @@ def detect_objects(frame):
     print(f"Processing frame of size: {width}x{height}")
     
     try:
-        # Create blob from image
+        # Preprocess image for better detection
+        # Convert to RGB if needed
+        if len(frame.shape) == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+        elif frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+        else:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+        # Apply slight blur to reduce noise
+        frame = cv2.GaussianBlur(frame, (3, 3), 0)
+        
+        # Create blob from image with adjusted parameters
         blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
         print("Created blob successfully")
         
@@ -78,6 +90,11 @@ def detect_objects(frame):
                 class_id = np.argmax(scores)
                 confidence = scores[class_id]
                 
+                # Print top 3 classes and their confidences for debugging
+                top_3_indices = np.argsort(scores)[-3:][::-1]
+                print(f"Top 3 classes: {[labels[i] for i in top_3_indices]}")
+                print(f"Top 3 confidences: {[scores[i] for i in top_3_indices]}")
+                
                 if confidence > confidence_threshold:
                     # Scale bounding box coordinates back relative to size of image
                     box = detection[0:4] * np.array([width, height, width, height])
@@ -87,13 +104,19 @@ def detect_objects(frame):
                     x = int(centerX - (width / 2))
                     y = int(centerY - (height / 2))
                     
+                    # Ensure coordinates are within frame bounds
+                    x = max(0, min(x, width))
+                    y = max(0, min(y, height))
+                    width = min(width, frame.shape[1] - x)
+                    height = min(height, frame.shape[0] - y)
+                    
                     boxes.append([x, y, int(width), int(height)])
                     confidences.append(float(confidence))
                     class_ids.append(class_id)
         
         print(f"Found {len(boxes)} potential detections")
         
-        # Apply non-maxima suppression
+        # Apply non-maxima suppression with adjusted threshold
         indices = cv2.dnn.NMSBoxes(boxes, confidences, confidence_threshold, nms_threshold)
         print(f"After NMS: {len(indices)} detections")
         
@@ -111,8 +134,14 @@ def detect_objects(frame):
                 # Draw bounding box and label on frame
                 (x, y, w, h) = boxes[i]
                 label = f"{labels[class_ids[i]]}: {confidences[i]:.2f}"
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
+                # Draw thicker bounding box
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
+                
+                # Add background to text for better visibility
+                (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                cv2.rectangle(frame, (x, y - text_height - 10), (x + text_width, y), (0, 255, 0), -1)
+                cv2.putText(frame, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
         
         return frame, detections
         
@@ -274,7 +303,7 @@ def video_feed():
 def update_threshold():
     global confidence_threshold
     data = request.get_json()
-    confidence_threshold = float(data.get('threshold', 0.5))
+    confidence_threshold = float(data.get('threshold', 0.3))
     return jsonify({'status': 'success'})
 
 if __name__ == '__main__':
