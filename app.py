@@ -163,6 +163,7 @@ def detection_thread():
     while True:
         try:
             if not detection_enabled:
+                latest_detections = []  # Clear detections when disabled
                 time.sleep(0.1)
                 continue
                 
@@ -205,7 +206,7 @@ def detection_thread():
                 class_id = int(box.cls[0])
                 class_name = results.names[class_id]
                 
-                # Scale coordinates
+                # Scale coordinates back to original size
                 x1 = int(x1 * width / 192)
                 y1 = int(y1 * height / 192)
                 x2 = int(x2 * width / 192)
@@ -217,17 +218,10 @@ def detection_thread():
                 x2 = max(0, min(x2, width))
                 y2 = max(0, min(y2, height))
                 
-                # Draw on frame
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                label = f"{class_name}: {confidence:.2f}"
-                (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                cv2.rectangle(frame, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
-                cv2.putText(frame, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-                
                 detections.append({
                     'object_name': class_name,
                     'confidence': confidence,
-                    'box': [x1, y1, x2 - x1, y2 - y1],
+                    'box': [x1, y1, x2 - x1, y2 - y1],  # [x, y, width, height]
                     'timestamp': datetime.datetime.now()
                 })
             
@@ -257,18 +251,28 @@ def gen_frames(user_id, feed_type='camera'):
                 # For detection feed, add bounding boxes
                 if feed_type == 'detection':
                     with detection_lock:
-                        detections = latest_detections.copy()
+                        detections = latest_detections.copy() if latest_detections else []
                     
                     # Draw detections on frame
                     for detection in detections:
+                        # Get box coordinates
                         x1, y1, w, h = detection['box']
-                        cv2.rectangle(frame, (x1, y1), (x1 + w, y1 + h), (0, 255, 0), 2)
+                        x2, y2 = x1 + w, y1 + h
+                        
+                        # Draw bounding box
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        
+                        # Add label with confidence
                         label = f"{detection['object_name']}: {detection['confidence']:.2f}"
-                        (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                        (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                        
+                        # Draw label background
                         cv2.rectangle(frame, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
-                        cv2.putText(frame, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                        
+                        # Draw label text
+                        cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
                     
-                    # Save detections to database
+                    # Save detections to database (only for new detections)
                     if user_id and detections:
                         for detection in detections:
                             new_detection = Detection(
