@@ -454,6 +454,29 @@ def toggle_detection():
     detection_enabled = not detection_enabled
     return jsonify({'status': 'success', 'detection_enabled': detection_enabled})
 
+# Add this new route for fetching recent detections
+@app.route('/get_recent_detections')
+@login_required
+def get_recent_detections():
+    try:
+        # Get last 10 detections for the current user
+        recent_detections = Detection.query.filter_by(user_id=current_user.id)\
+            .order_by(Detection.timestamp.desc())\
+            .limit(10)\
+            .all()
+        
+        # Format detections for JSON response
+        detections_list = [{
+            'object_name': d.object_name,
+            'confidence': round(d.confidence, 2),
+            'timestamp': d.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        } for d in recent_detections]
+        
+        return jsonify({'status': 'success', 'detections': detections_list})
+    except Exception as e:
+        print(f"Error fetching recent detections: {e}")
+        return jsonify({'status': 'error', 'message': str(e)})
+
 # Register cleanup function
 atexit.register(release_camera)
 

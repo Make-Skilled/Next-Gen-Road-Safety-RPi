@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Road Safety Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100">
     <!-- Navigation -->
@@ -13,11 +13,11 @@
         <div class="max-w-7xl mx-auto px-4">
             <div class="flex justify-between h-16">
                 <div class="flex items-center">
-                    <h1 class="text-xl font-bold text-gray-800">Road Safety System</h1>
+                    <span class="text-xl font-semibold text-gray-800">Road Safety System</span>
                 </div>
                 <div class="flex items-center space-x-4">
                     <span class="text-gray-600">Welcome, {{ current_user.username }}</span>
-                    <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition duration-200">
+                    <a href="{{ url_for('logout') }}" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-md">
                         Logout
                     </a>
                 </div>
@@ -26,115 +26,146 @@
     </nav>
 
     <!-- Main Content -->
-    <div class="max-w-7xl mx-auto px-4 py-8">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <div class="max-w-7xl mx-auto px-4 py-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <!-- Video Feeds Section -->
             <div class="space-y-6">
-                <div class="bg-white rounded-lg shadow-lg p-6">
-                    <h2 class="text-xl font-semibold text-gray-800 mb-4">Live Camera Feed</h2>
-                    <div class="relative aspect-video bg-black rounded-lg overflow-hidden">
-                        <img id="cameraFeed" src="{{ url_for('video_feed', type='camera') }}" alt="Camera Feed" class="w-full h-full object-contain">
-                        <div class="absolute bottom-4 left-4 right-4 flex justify-between items-center">
-                            <div class="flex items-center space-x-4">
-                                <label class="text-white text-sm">Confidence Threshold:</label>
-                                <input type="range" id="confidenceThreshold" min="0" max="1" step="0.1" value="0.3" 
-                                       class="w-32 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
-                                <span id="thresholdValue" class="text-white text-sm">0.3</span>
-                            </div>
-                            <button id="toggleDetection" class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition duration-200">
-                                <i class="fas fa-power-off mr-2"></i>Toggle Detection
-                            </button>
+                <!-- Live Camera Feed -->
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-4">Live Camera Feed</h2>
+                    <div class="relative">
+                        <img id="camera-feed" src="{{ url_for('video_feed', type='camera') }}" 
+                             class="w-full rounded-lg" alt="Camera Feed"
+                             onerror="handleVideoError(this, 'camera-error')">
+                        <div id="camera-error" class="hidden absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 rounded-lg">
+                            <p class="text-white text-center">Camera feed unavailable.<br>Please check your connection.</p>
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-lg shadow-lg p-6">
-                    <h2 class="text-xl font-semibold text-gray-800 mb-4">Detection Overlay</h2>
-                    <div class="relative aspect-video bg-black rounded-lg overflow-hidden">
-                        <img id="detectionFeed" src="{{ url_for('video_feed', type='detection') }}" alt="Detection Feed" class="w-full h-full object-contain">
-                        <div class="absolute top-4 right-4">
-                            <span id="detectionStatus" class="bg-green-500 text-white px-3 py-1 rounded-full text-sm">
-                                Detection Active
-                            </span>
+                <!-- Detection Feed -->
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-4">Detection Feed</h2>
+                    <div class="relative">
+                        <img id="detection-feed" src="{{ url_for('video_feed', type='detection') }}" 
+                             class="w-full rounded-lg" alt="Detection Feed"
+                             onerror="handleVideoError(this, 'detection-error')">
+                        <div id="detection-error" class="hidden absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-75 rounded-lg">
+                            <p class="text-white text-center">Detection feed unavailable.<br>Please check your connection.</p>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Detection History Section -->
-            <div class="bg-white rounded-lg shadow-lg p-6">
-                <h2 class="text-xl font-semibold text-gray-800 mb-4">Recent Detections</h2>
-                <div class="space-y-4 max-h-[800px] overflow-y-auto">
-                    {% for detection in detections %}
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <h3 class="font-medium text-gray-800">{{ detection.object_name }}</h3>
-                                <p class="text-sm text-gray-600">Confidence: {{ "%.2f"|format(detection.confidence) }}</p>
-                                <p class="text-sm text-gray-500">{{ detection.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-                            </div>
-                            <div class="text-gray-400">
-                                <i class="fas fa-circle"></i>
+            <!-- Controls and Recent Detections -->
+            <div class="space-y-6">
+                <!-- Detection Controls -->
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-4">Detection Controls</h2>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Confidence Threshold</label>
+                            <input type="range" min="0" max="1" step="0.05" value="0.3" 
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                   id="confidence-slider">
+                            <div class="text-right text-sm text-gray-600">
+                                Value: <span id="confidence-value">0.3</span>
                             </div>
                         </div>
+                        <button id="toggle-detection" 
+                                class="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-md">
+                            Disable Detection
+                        </button>
                     </div>
-                    {% endfor %}
+                </div>
+
+                <!-- Recent Detections -->
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h2 class="text-lg font-semibold mb-4">Recent Detections</h2>
+                    <div id="recent-detections" class="space-y-2">
+                        <!-- Detections will be populated here -->
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // Update confidence threshold
-        const thresholdSlider = document.getElementById('confidenceThreshold');
-        const thresholdValue = document.getElementById('thresholdValue');
-        const toggleButton = document.getElementById('toggleDetection');
-        const detectionStatus = document.getElementById('detectionStatus');
+        // Handle video feed errors
+        function handleVideoError(img, errorId) {
+            document.getElementById(errorId).classList.remove('hidden');
+            setTimeout(() => {
+                img.src = img.src; // Retry loading
+            }, 5000);
+        }
 
-        thresholdSlider.addEventListener('input', function() {
-            thresholdValue.textContent = this.value;
+        // Update confidence threshold
+        const confidenceSlider = document.getElementById('confidence-slider');
+        const confidenceValue = document.getElementById('confidence-value');
+        
+        confidenceSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            confidenceValue.textContent = value;
+            
             fetch('/update_threshold', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ threshold: this.value })
+                body: JSON.stringify({ threshold: value })
             });
         });
 
         // Toggle detection
-        toggleButton.addEventListener('click', function() {
+        const toggleBtn = document.getElementById('toggle-detection');
+        let detectionEnabled = true;
+        
+        toggleBtn.addEventListener('click', () => {
             fetch('/toggle_detection', {
                 method: 'POST'
             })
             .then(response => response.json())
             .then(data => {
-                if (data.detection_enabled) {
-                    detectionStatus.textContent = 'Detection Active';
-                    detectionStatus.classList.remove('bg-red-500');
-                    detectionStatus.classList.add('bg-green-500');
-                    toggleButton.innerHTML = '<i class="fas fa-power-off mr-2"></i>Toggle Detection';
-                } else {
-                    detectionStatus.textContent = 'Detection Paused';
-                    detectionStatus.classList.remove('bg-green-500');
-                    detectionStatus.classList.add('bg-red-500');
-                    toggleButton.innerHTML = '<i class="fas fa-play mr-2"></i>Resume Detection';
-                }
+                detectionEnabled = data.detection_enabled;
+                toggleBtn.textContent = detectionEnabled ? 'Disable Detection' : 'Enable Detection';
+                toggleBtn.classList.toggle('bg-blue-500');
+                toggleBtn.classList.toggle('bg-gray-500');
             });
         });
 
-        // Handle video feed errors
-        const cameraFeed = document.getElementById('cameraFeed');
-        const detectionFeed = document.getElementById('detectionFeed');
-
-        function handleVideoError(img) {
-            img.onerror = function() {
-                this.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23f3f4f6'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='14' fill='%236b7280'%3EVideo Feed Error%3C/text%3E%3C/svg%3E";
-            };
+        // Function to update recent detections
+        function updateRecentDetections() {
+            fetch('/get_recent_detections')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const detectionsDiv = document.getElementById('recent-detections');
+                        detectionsDiv.innerHTML = ''; // Clear current detections
+                        
+                        data.detections.forEach(detection => {
+                            const detectionEl = document.createElement('div');
+                            detectionEl.className = 'bg-gray-50 p-3 rounded-md';
+                            detectionEl.innerHTML = `
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <span class="font-medium">${detection.object_name}</span>
+                                        <span class="text-sm text-gray-600 ml-2">${detection.confidence}</span>
+                                    </div>
+                                    <span class="text-xs text-gray-500">${detection.timestamp}</span>
+                                </div>
+                            `;
+                            detectionsDiv.appendChild(detectionEl);
+                        });
+                    }
+                })
+                .catch(error => console.error('Error fetching detections:', error));
         }
 
-        handleVideoError(cameraFeed);
-        handleVideoError(detectionFeed);
+        // Update detections every 2 seconds
+        setInterval(updateRecentDetections, 2000);
+
+        // Initial update
+        updateRecentDetections();
     </script>
 </body>
 </html> 
