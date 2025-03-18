@@ -22,7 +22,7 @@ class ObjectDetector:
         self.nms_threshold = 0.3
         
         # Initialize camera with specific settings for Raspberry Pi
-        self.camera = cv2.VideoCapture(0)
+        self.camera = cv2.VideoCapture(0,cv2.CAP_V4L)
         
         # Set camera properties
         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
