@@ -34,6 +34,14 @@
         .detection-item:last-child {
             border-bottom: none;
         }
+        .video-error {
+            color: red;
+            text-align: center;
+            padding: 20px;
+            background: #fff3f3;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
@@ -61,14 +69,14 @@
             <!-- Video Feed and Controls -->
             <div class="col-md-8">
                 <div class="video-container">
-                    <img src="{{ url_for('video_feed') }}" class="video-feed" alt="Video Feed">
+                    <img src="{{ url_for('video_feed') }}" class="video-feed" alt="Video Feed" onerror="this.onerror=null; this.src=''; this.parentElement.innerHTML='<div class=\'video-error\'>Error loading video feed. Please refresh the page.</div>';">
                 </div>
                 
                 <div class="detection-controls">
                     <h5>Detection Controls</h5>
                     <div class="mb-3">
-                        <label for="confidenceThreshold" class="form-label">Confidence Threshold: <span id="thresholdValue">0.5</span></label>
-                        <input type="range" class="form-range" id="confidenceThreshold" min="0" max="1" step="0.1" value="0.5">
+                        <label for="confidenceThreshold" class="form-label">Confidence Threshold: <span id="thresholdValue">0.3</span></label>
+                        <input type="range" class="form-range" id="confidenceThreshold" min="0" max="1" step="0.1" value="0.3">
                     </div>
                 </div>
             </div>
@@ -125,39 +133,6 @@
             })
             .catch(error => console.error('Error:', error));
         });
-
-        // WebSocket connection for real-time updates
-        const ws = new WebSocket(`ws://${window.location.host}/ws/detection`);
-        
-        ws.onmessage = function(event) {
-            const detection = JSON.parse(event.data);
-            const detectionList = document.querySelector('.detection-list');
-            
-            // Create new detection item
-            const detectionItem = document.createElement('div');
-            detectionItem.className = 'detection-item';
-            detectionItem.innerHTML = `
-                <strong>${detection.object_name}</strong><br>
-                <small class="text-muted">Confidence: ${detection.confidence.toFixed(2)}</small><br>
-                <small class="text-muted">${new Date(detection.timestamp).toLocaleString()}</small>
-            `;
-            
-            // Add to top of list
-            detectionList.insertBefore(detectionItem, detectionList.firstChild);
-            
-            // Keep only last 50 detections
-            while (detectionList.children.length > 50) {
-                detectionList.removeChild(detectionList.lastChild);
-            }
-        };
-        
-        ws.onerror = function(error) {
-            console.error('WebSocket error:', error);
-        };
-        
-        ws.onclose = function() {
-            console.log('WebSocket connection closed');
-        };
     </script>
 </body>
 </html> 

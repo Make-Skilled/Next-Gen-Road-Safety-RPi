@@ -26,9 +26,17 @@ nms_threshold = 0.2
 # Load YOLO model
 config_path = "yolov3-tiny.cfg"
 weights_path = "yolov3-tiny.weights"
-net = cv2.dnn.readNetFromDarknet(config_path, weights_path)
-net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
+try:
+    print("Loading YOLO model...")
+    net = cv2.dnn.readNetFromDarknet(config_path, weights_path)
+    net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+    net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+    print("YOLO model loaded successfully")
+except Exception as e:
+    print(f"Error loading YOLO model: {e}")
+    print("Please ensure yolov3-tiny.cfg and yolov3-tiny.weights are in the correct location")
+    raise
 
 # Load COCO labels
 def load_labels():
@@ -96,6 +104,7 @@ def detect_objects(frame):
                 print(f"Top 3 confidences: {[scores[i] for i in top_3_indices]}")
                 
                 if confidence > confidence_threshold:
+                    print(f"Found detection: {labels[class_id]} with confidence {confidence:.2f}")
                     # Scale bounding box coordinates back relative to size of image
                     box = detection[0:4] * np.array([width, height, width, height])
                     (centerX, centerY, width, height) = box.astype("int")
@@ -110,6 +119,7 @@ def detect_objects(frame):
                     width = min(width, frame.shape[1] - x)
                     height = min(height, frame.shape[0] - y)
                     
+                    print(f"Drawing box at ({x}, {y}) with size {width}x{height}")
                     boxes.append([x, y, int(width), int(height)])
                     confidences.append(float(confidence))
                     class_ids.append(class_id)
@@ -135,6 +145,8 @@ def detect_objects(frame):
                 (x, y, w, h) = boxes[i]
                 label = f"{labels[class_ids[i]]}: {confidences[i]:.2f}"
                 
+                print(f"Drawing final box for {label} at ({x}, {y}) with size {w}x{h}")
+                
                 # Draw thicker bounding box
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
                 
@@ -142,6 +154,8 @@ def detect_objects(frame):
                 (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
                 cv2.rectangle(frame, (x, y - text_height - 10), (x + text_width, y), (0, 255, 0), -1)
                 cv2.putText(frame, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+        else:
+            print("No detections passed NMS threshold")
         
         return frame, detections
         
