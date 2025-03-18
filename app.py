@@ -191,45 +191,62 @@ def detection_thread():
                 time.sleep(0.1)
                 continue
             
-            # Process frame
-            height, width = frame.shape[:2]
-            frame_resized = cv2.resize(frame, (192, 192))
-            
-            # Run detection
-            results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
-            
-            # Process detections
-            detections = []
-            for box in results.boxes:
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                confidence = float(box.conf[0])
-                class_id = int(box.cls[0])
-                class_name = results.names[class_id]
+            try:
+                # Process frame
+                height, width = frame.shape[:2]
+                frame_resized = cv2.resize(frame, (192, 192))
                 
-                # Scale coordinates back to original size
-                x1 = int(x1 * width / 192)
-                y1 = int(y1 * height / 192)
-                x2 = int(x2 * width / 192)
-                y2 = int(y2 * height / 192)
+                # Run detection
+                results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
                 
-                # Ensure coordinates are within bounds
-                x1 = max(0, min(x1, width))
-                y1 = max(0, min(y1, height))
-                x2 = max(0, min(x2, width))
-                y2 = max(0, min(y2, height))
+                # Process detections
+                detections = []
+                for box in results.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = float(box.conf[0])
+                    class_id = int(box.cls[0])
+                    class_name = results.names[class_id]
+                    
+                    # Scale coordinates back to original size
+                    x1 = int(x1 * width / 192)
+                    y1 = int(y1 * height / 192)
+                    x2 = int(x2 * width / 192)
+                    y2 = int(y2 * height / 192)
+                    
+                    # Ensure coordinates are within bounds
+                    x1 = max(0, min(x1, width))
+                    y1 = max(0, min(y1, height))
+                    x2 = max(0, min(x2, width))
+                    y2 = max(0, min(y2, height))
+                    
+                    detections.append({
+                        'object_name': class_name,
+                        'confidence': confidence,
+                        'box': [x1, y1, x2 - x1, y2 - y1],  # [x, y, width, height]
+                        'timestamp': datetime.datetime.now()
+                    })
                 
-                detections.append({
-                    'object_name': class_name,
-                    'confidence': confidence,
-                    'box': [x1, y1, x2 - x1, y2 - y1],  # [x, y, width, height]
-                    'timestamp': datetime.datetime.now()
-                })
+                # Update latest detections
+                with detection_lock:
+                    latest_detections = detections
+                
+                # Save to database in detection thread
+                if detections:
+                    with app.app_context():
+                        for detection in detections:
+                            new_detection = Detection(
+                                object_name=detection['object_name'],
+                                confidence=detection['confidence'],
+                                user_id=current_user.id if current_user else None
+                            )
+                            db.session.add(new_detection)
+                        db.session.commit()
+                
+                last_processing_time = current_time
+                
+            except Exception as e:
+                print(f"Error processing detection: {e}")
             
-            # Update latest detections
-            with detection_lock:
-                latest_detections = detections
-            
-            last_processing_time = current_time
             time.sleep(0.01)
             
         except Exception as e:
@@ -238,68 +255,74 @@ def detection_thread():
 
 def gen_frames(user_id, feed_type='camera'):
     """Generate frames for video feed"""
-    with app.app_context():
-        while True:
-            try:
-                # Get latest frame
-                with frame_lock:
-                    if latest_frame is None:
-                        time.sleep(0.01)
-                        continue
-                    frame = latest_frame.copy()
-                
-                # For detection feed, add bounding boxes
-                if feed_type == 'detection':
+    frame_buffer = None
+    last_detection_time = 0
+    detection_interval = 0.033  # ~30fps for detection overlay
+    
+    while True:
+        try:
+            current_time = time.time()
+            
+            # Get latest frame
+            with frame_lock:
+                if latest_frame is None:
+                    time.sleep(0.01)
+                    continue
+                frame = latest_frame.copy()
+            
+            # For detection feed, add bounding boxes
+            if feed_type == 'detection':
+                # Only update frame buffer at specified interval
+                if current_time - last_detection_time >= detection_interval:
+                    frame_buffer = frame.copy()
                     with detection_lock:
                         detections = latest_detections.copy() if latest_detections else []
                     
-                    # Draw detections on frame
+                    # Draw detections on frame buffer
                     for detection in detections:
-                        # Get box coordinates
                         x1, y1, w, h = detection['box']
                         x2, y2 = x1 + w, y1 + h
                         
                         # Draw bounding box
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.rectangle(frame_buffer, (x1, y1), (x2, y2), (0, 255, 0), 2)
                         
                         # Add label with confidence
                         label = f"{detection['object_name']}: {detection['confidence']:.2f}"
                         (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
                         
                         # Draw label background
-                        cv2.rectangle(frame, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
+                        cv2.rectangle(frame_buffer, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
                         
                         # Draw label text
-                        cv2.putText(frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+                        cv2.putText(frame_buffer, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
                     
-                    # Save detections to database (only for new detections)
-                    if user_id and detections:
-                        for detection in detections:
-                            new_detection = Detection(
-                                object_name=detection['object_name'],
-                                confidence=detection['confidence'],
-                                user_id=user_id
-                            )
-                            db.session.add(new_detection)
-                        db.session.commit()
+                    last_detection_time = current_time
                 
-                # Convert frame to JPEG with valid parameters
-                encode_params = [
-                    cv2.IMWRITE_JPEG_QUALITY, 85,
-                    cv2.IMWRITE_JPEG_OPTIMIZE, 1
-                ]
-                ret, buffer = cv2.imencode('.jpg', frame, encode_params)
+                # Use frame buffer for detection feed
+                if frame_buffer is not None:
+                    frame = frame_buffer
+            
+            # Convert frame to JPEG with valid parameters
+            encode_params = [
+                cv2.IMWRITE_JPEG_QUALITY, 85,
+                cv2.IMWRITE_JPEG_OPTIMIZE, 1
+            ]
+            ret, buffer = cv2.imencode('.jpg', frame, encode_params)
+            
+            if ret:
+                frame = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            
+            # Adaptive sleep based on feed type
+            if feed_type == 'camera':
+                time.sleep(0.01)  # Faster for camera feed
+            else:
+                time.sleep(0.02)  # Slower for detection feed
                 
-                if ret:
-                    frame = buffer.tobytes()
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                
-                time.sleep(0.01)
-                
-            except Exception as e:
-                print(f"Error in gen_frames: {e}")
-                time.sleep(0.1)
+        except Exception as e:
+            print(f"Error in gen_frames: {e}")
+            time.sleep(0.1)
 
 # User Model
 class User(UserMixin, db.Model):
