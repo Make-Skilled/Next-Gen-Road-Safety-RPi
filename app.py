@@ -233,8 +233,7 @@ def load_user(user_id):
 def index():
     global camera_initialized
     if not camera_initialized:
-        if not init_camera():
-            flash('Camera not available. Please check your camera connection.')
+        flash('Camera not available. Please check your camera connection.')
     return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -297,8 +296,7 @@ def logout():
 def video_feed():
     global camera_initialized
     if not camera_initialized:
-        if not init_camera():
-            return "Camera not available", 503
+        return "Camera not available", 503
     return Response(gen_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
@@ -315,9 +313,8 @@ def update_threshold():
 def detect():
     global camera_initialized
     if not camera_initialized:
-        if not init_camera():
-            flash('Camera not available. Please check your camera connection.')
-            return redirect(url_for('index'))
+        flash('Camera not available. Please check your camera connection.')
+        return redirect(url_for('index'))
     return render_template('detect.html')
 
 if __name__ == '__main__':
