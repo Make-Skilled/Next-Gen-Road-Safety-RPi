@@ -6,7 +6,22 @@
         <h2 class="text-2xl font-bold mb-6">Object Detection</h2>
 
         <div class="bg-white rounded-lg shadow-md p-6">
-            <div class="aspect-w-16 aspect-h-9 mb-6">
+            <div class="aspect-w-16 aspect-h-9 mb-6 relative">
+                <div id="camera-loading" class="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
+                    <div class="text-center">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                        <p class="mt-2 text-gray-600">Initializing camera...</p>
+                    </div>
+                </div>
+                <div id="camera-error" class="hidden absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
+                    <div class="text-center">
+                        <svg class="mx-auto h-12 w-12 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                        </svg>
+                        <p class="mt-2 text-gray-600">Camera not available</p>
+                        <p class="text-sm text-gray-500">Please check your camera connection</p>
+                    </div>
+                </div>
                 <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Video Feed" class="rounded-lg w-full h-full object-cover">
             </div>
 
@@ -58,6 +73,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const confidenceValue = document.getElementById('confidence-value');
     const latestDetection = document.getElementById('latest-detection');
     const recentDetections = document.getElementById('recent-detections');
+    const videoFeed = document.getElementById('video-feed');
+    const cameraLoading = document.getElementById('camera-loading');
+    const cameraError = document.getElementById('camera-error');
+    
+    // Handle video feed loading
+    videoFeed.onload = function() {
+        cameraLoading.classList.add('hidden');
+        cameraError.classList.add('hidden');
+    };
+    
+    videoFeed.onerror = function() {
+        cameraLoading.classList.add('hidden');
+        cameraError.classList.remove('hidden');
+    };
     
     // Update confidence threshold display
     confidenceSlider.addEventListener('input', function() {
@@ -73,6 +102,8 @@ document.addEventListener('DOMContentLoaded', function() {
             body: JSON.stringify({
                 threshold: value / 100
             })
+        }).catch(error => {
+            console.error('Error updating threshold:', error);
         });
     });
 
@@ -115,10 +146,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     ws.onerror = function(error) {
         console.error('WebSocket error:', error);
+        cameraError.classList.remove('hidden');
     };
 
     ws.onclose = function() {
         console.log('WebSocket connection closed');
+        cameraError.classList.remove('hidden');
     };
 });
 </script>

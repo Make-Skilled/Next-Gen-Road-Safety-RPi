@@ -21,14 +21,30 @@ class ObjectDetector:
         self.confidence_threshold = confidence_threshold
         self.nms_threshold = 0.3
         
-        # Initialize camera
+        # Initialize camera with specific settings for Raspberry Pi
         self.camera = cv2.VideoCapture(0)
+        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.camera.set(cv2.CAP_PROP_FPS, 30)
+        
+        # Wait for camera to initialize
+        time.sleep(2)
+        
+        if not self.camera.isOpened():
+            raise Exception("Could not open camera")
         
     def _load_labels(self):
-        with open(self.labels_path, 'r') as f:
-            return [line.strip() for line in f.readlines()]
+        try:
+            with open(self.labels_path, 'r') as f:
+                return [line.strip() for line in f.readlines()]
+        except FileNotFoundError:
+            print(f"Warning: {self.labels_path} not found. Using default COCO labels.")
+            return ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light']
     
     def detect_objects(self, frame):
+        if frame is None:
+            return None, []
+            
         height, width = frame.shape[:2]
         
         # Create blob from image
@@ -91,13 +107,20 @@ class ObjectDetector:
     
     def get_frame(self):
         ret, frame = self.camera.read()
-        if ret:
-            frame, detections = self.detect_objects(frame)
-            return frame, detections
-        return None, []
+        if not ret:
+            print("Failed to grab frame")
+            return None, []
+            
+        # Flip the frame horizontally for a later selfie-view display
+        frame = cv2.flip(frame, 1)
+        
+        # Detect objects
+        frame, detections = self.detect_objects(frame)
+        return frame, detections
     
     def release(self):
-        self.camera.release()
+        if self.camera.isOpened():
+            self.camera.release()
 
     def set_confidence_threshold(self, threshold):
         self.confidence_threshold = threshold 

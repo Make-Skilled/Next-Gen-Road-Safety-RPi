@@ -8,6 +8,7 @@ import os
 from object_detection import ObjectDetector
 import json
 from simple_websocket import Server
+import time
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure secret key
@@ -18,7 +19,11 @@ login_manager.init_app(app)
 login_manager.login_view = 'login'
 
 # Initialize object detector
-detector = ObjectDetector()
+try:
+    detector = ObjectDetector()
+except Exception as e:
+    print(f"Error initializing detector: {e}")
+    detector = None
 
 # User Model
 class User(UserMixin, db.Model):
@@ -41,27 +46,37 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 def gen_frames():
+    if detector is None:
+        print("Detector not initialized")
+        return
+        
     while True:
-        frame, detections = detector.get_frame()
-        if frame is not None:
-            # Save detections to database if user is logged in
-            if current_user.is_authenticated and detections:
-                for detection in detections:
-                    new_detection = Detection(
-                        object_name=detection['object_name'],
-                        confidence=detection['confidence'],
-                        user_id=current_user.id
-                    )
-                    db.session.add(new_detection)
-                db.session.commit()
+        try:
+            frame, detections = detector.get_frame()
+            if frame is not None:
+                # Save detections to database if user is logged in
+                if current_user.is_authenticated and detections:
+                    for detection in detections:
+                        new_detection = Detection(
+                            object_name=detection['object_name'],
+                            confidence=detection['confidence'],
+                            user_id=current_user.id
+                        )
+                        db.session.add(new_detection)
+                    db.session.commit()
 
-            # Convert frame to JPEG
-            ret, buffer = cv2.imencode('.jpg', frame)
-            frame = buffer.tobytes()
-            
-            # Yield frame for streaming
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                # Convert frame to JPEG
+                ret, buffer = cv2.imencode('.jpg', frame)
+                if ret:
+                    frame = buffer.tobytes()
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            else:
+                print("No frame received")
+                time.sleep(0.1)  # Small delay before retrying
+        except Exception as e:
+            print(f"Error in gen_frames: {e}")
+            time.sleep(1)  # Longer delay on error
 
 @app.route('/')
 def index():
@@ -121,17 +136,24 @@ def logout():
 @app.route('/detect')
 @login_required
 def detect():
+    if detector is None:
+        flash('Camera not available. Please check your camera connection.')
+        return redirect(url_for('dashboard'))
     return render_template('detect.html')
 
 @app.route('/video_feed')
 @login_required
 def video_feed():
+    if detector is None:
+        return "Camera not available", 503
     return Response(gen_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/update_threshold', methods=['POST'])
 @login_required
 def update_threshold():
+    if detector is None:
+        return jsonify({'status': 'error', 'message': 'Camera not available'}), 503
     data = request.get_json()
     threshold = float(data.get('threshold', 0.5))
     detector.set_confidence_threshold(threshold)
@@ -140,6 +162,8 @@ def update_threshold():
 @app.route('/ws/detection')
 @login_required
 def ws_detection():
+    if detector is None:
+        return "Camera not available", 503
     ws = Server(request.environ)
     try:
         while True:
