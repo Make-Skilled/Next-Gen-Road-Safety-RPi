@@ -23,10 +23,10 @@ login_manager.login_view = 'login'
 
 # Global variables for detection settings
 confidence_threshold = 0.3
-frame_skip = 20  # Increased to process fewer frames
+frame_skip = 15  # Process every 15th frame
 frame_count = 0
 last_processing_time = 0
-min_processing_interval = 0.3  # Increased interval between detections
+min_processing_interval = 0.2  # 200ms between detections
 detection_enabled = True
 camera = None
 latest_frame = None
@@ -35,7 +35,6 @@ frame_lock = threading.Lock()
 detection_lock = threading.Lock()
 latest_processed_frame = None
 processed_frame_lock = threading.Lock()
-detection_frame_buffer = None  # Buffer for detection frames
 
 # Load YOLOv8 model
 try:
@@ -101,13 +100,11 @@ def init_camera():
             print("Failed to open camera")
             return False
             
-        # Optimize camera settings for performance
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)  # Reduced resolution
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
-        camera.set(cv2.CAP_PROP_FPS, 10)  # Reduced FPS
-        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimum buffer
-        camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
-        camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        # Configure camera settings - keep original for live feed
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        camera.set(cv2.CAP_PROP_FPS, 30)  # Increased FPS for smoother live feed
+        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimum buffer size for lower latency
         print("Camera initialized successfully")
         return True
     except Exception as e:
@@ -138,32 +135,29 @@ def camera_thread():
                 retry_count += 1
                 if retry_count >= max_retries:
                     print("Failed to initialize camera after multiple attempts")
-                    time.sleep(5)
+                    time.sleep(5)  # Wait before retrying
                     retry_count = 0
                 continue
-            
+                
             while camera is not None:
                 ret, frame = camera.read()
                 if not ret:
                     print("Failed to read frame")
                     break
-                
-                # Only flip and update frame, no other processing
-                frame = cv2.flip(frame, 1)
+                    
+                frame = cv2.flip(frame, 1)  # Flip for selfie view
                 with frame_lock:
-                    latest_frame = frame  # No need to copy for camera feed
+                    latest_frame = frame.copy()
+                time.sleep(0.01)  # Small delay to prevent CPU overload
                 
-                # Minimal sleep to prevent CPU overload while maintaining high FPS
-                time.sleep(0.001)
-        
         except Exception as e:
             print(f"Error in camera thread: {e}")
-            release_camera()
-            time.sleep(1)
+            release_camera()  # Release camera on error
+            time.sleep(1)  # Wait before retrying
 
 def detection_thread():
     """Thread for object detection"""
-    global latest_frame, latest_detections, frame_count, last_processing_time, latest_processed_frame, detection_frame_buffer
+    global latest_frame, latest_detections, frame_count, last_processing_time, latest_processed_frame
     
     while True:
         try:
@@ -171,25 +165,30 @@ def detection_thread():
                 latest_detections = []
                 with processed_frame_lock:
                     latest_processed_frame = None
-                time.sleep(0.2)
+                time.sleep(0.1)
                 continue
             
             current_time = time.time()
             if current_time - last_processing_time < min_processing_interval:
-                time.sleep(0.1)  # Longer sleep when not processing
+                time.sleep(0.01)
                 continue
             
             # Get latest frame
             with frame_lock:
                 if latest_frame is None:
-                    time.sleep(0.1)
+                    time.sleep(0.01)
                     continue
                 frame = latest_frame.copy()
             
+            # Process frame
             try:
-                # Resize frame for faster processing
+                # Resize frame for faster processing - more aggressive downscaling
                 height, width = frame.shape[:2]
-                frame_resized = cv2.resize(frame, (96, 96))  # Even smaller size for detection
+                detection_size = 128  # Reduced detection size for speed
+                frame_resized = cv2.resize(frame, (detection_size, detection_size))
+                
+                # Convert to float16 for faster processing
+                frame_resized = frame_resized.astype(np.float16)
                 
                 # Run detection with optimized parameters
                 results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
@@ -207,38 +206,41 @@ def detection_thread():
                     class_ids = boxes.cls.cpu().numpy().astype(int)
                     
                     # Scale all coordinates at once
-                    scale_x = width / 96
-                    scale_y = height / 96
+                    scale_x = width / detection_size
+                    scale_y = height / detection_size
                     coords[:, [0, 2]] *= scale_x
                     coords[:, [1, 3]] *= scale_y
                     coords = coords.astype(int)
                     
-                    # Draw all boxes at once for better performance
+                    # Draw all boxes at once using vectorized operations
                     for i in range(len(boxes)):
                         x1, y1, x2, y2 = coords[i]
                         confidence = float(confs[i])
                         class_name = results.names[class_ids[i]]
                         
-                        # Simplified drawing
-                        cv2.rectangle(processed_frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
-                        cv2.putText(processed_frame, class_name, (x1, y1 - 5), 
-                                  cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-                        
-                        detections.append({
-                            'object_name': class_name,
-                            'confidence': confidence,
-                            'box': [x1, y1, x2 - x1, y2 - y1],
-                            'timestamp': datetime.datetime.now()
-                        })
+                        # Only draw if confidence is high enough
+                        if confidence >= confidence_threshold:
+                            # Simplified drawing for speed
+                            cv2.rectangle(processed_frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                            label = f"{class_name}:{confidence:.1f}"
+                            cv2.putText(processed_frame, label, (x1, y1 - 5), 
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                            
+                            detections.append({
+                                'object_name': class_name,
+                                'confidence': confidence,
+                                'box': [x1, y1, x2 - x1, y2 - y1],
+                                'timestamp': datetime.datetime.now()
+                            })
                 
-                # Update detection results
+                # Update latest detections and processed frame
                 with detection_lock:
                     latest_detections = detections
                 with processed_frame_lock:
                     latest_processed_frame = processed_frame
-                    
-                # Save to database very infrequently (every 3 seconds)
-                if detections and time.time() - last_processing_time > 3.0:
+                
+                # Save to database less frequently (every 2 seconds)
+                if detections and time.time() - last_processing_time > 2.0:
                     with app.app_context():
                         for detection in detections:
                             new_detection = Detection(
@@ -248,49 +250,57 @@ def detection_thread():
                             )
                             db.session.add(new_detection)
                         db.session.commit()
-                
-                last_processing_time = current_time
+                    last_processing_time = time.time()
                 
             except Exception as e:
                 print(f"Error processing detection: {e}")
             
-            time.sleep(0.1)  # Longer delay between detections
+            time.sleep(0.01)
             
         except Exception as e:
             print(f"Error in detection thread: {e}")
-            time.sleep(0.2)
+            time.sleep(0.1)
 
 def gen_frames(user_id, feed_type='camera'):
     """Generate frames for video feed"""
     last_frame_time = 0
-    frame_interval = 0.016 if feed_type == 'camera' else 0.1  # 60fps for camera, 10fps for detection
+    frame_interval = 0.016  # ~60fps for live feed
     
     while True:
         try:
             current_time = time.time()
             if current_time - last_frame_time < frame_interval:
-                time.sleep(0.001)  # Minimal sleep for camera feed
+                time.sleep(0.001)
                 continue
-            
+                
             # Get appropriate frame based on feed type
             if feed_type == 'detection':
                 with processed_frame_lock:
                     if latest_processed_frame is None:
-                        time.sleep(0.01)
+                        time.sleep(0.001)
                         continue
-                    frame = latest_processed_frame
-                    # Lower quality for detection feed
-                    encode_params = [cv2.IMWRITE_JPEG_QUALITY, 65]
+                    frame = latest_processed_frame.copy()
             else:
                 with frame_lock:
                     if latest_frame is None:
                         time.sleep(0.001)
                         continue
-                    frame = latest_frame
-                    # Keep high quality for camera feed
-                    encode_params = [cv2.IMWRITE_JPEG_QUALITY, 90]
+                    frame = latest_frame.copy()
             
-            # Convert frame to JPEG
+            # Optimize JPEG encoding based on feed type
+            if feed_type == 'camera':
+                # Higher quality for live feed
+                encode_params = [
+                    cv2.IMWRITE_JPEG_QUALITY, 95,
+                    cv2.IMWRITE_JPEG_OPTIMIZE, 1
+                ]
+            else:
+                # Lower quality for detection feed
+                encode_params = [
+                    cv2.IMWRITE_JPEG_QUALITY, 75,
+                    cv2.IMWRITE_JPEG_OPTIMIZE, 1
+                ]
+            
             ret, buffer = cv2.imencode('.jpg', frame, encode_params)
             
             if ret:
