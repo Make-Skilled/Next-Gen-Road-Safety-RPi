@@ -10,6 +10,7 @@ import json
 from simple_websocket import Server
 import time
 import threading
+import atexit
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure secret key
@@ -28,7 +29,12 @@ def init_detector():
     try:
         if detector is not None:
             detector.release()  # Release the camera before reinitializing
+            time.sleep(1)  # Wait for camera to fully release
+            
         detector = ObjectDetector()
+        if detector.camera is None:
+            raise Exception("Failed to initialize camera")
+            
         print("Detector initialized successfully")
         return True
     except Exception as e:
@@ -38,8 +44,18 @@ def init_detector():
         detector = None
         return False
 
-# Initialize detector
+def cleanup_detector():
+    global detector
+    if detector is not None:
+        detector.release()
+        detector = None
+        print("Detector cleaned up")
+
+# Initialize detector at startup
 init_detector()
+
+# Register cleanup function
+atexit.register(cleanup_detector)
 
 # User Model
 class User(UserMixin, db.Model):

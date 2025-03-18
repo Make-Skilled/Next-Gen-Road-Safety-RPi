@@ -26,28 +26,39 @@ class ObjectDetector:
         self._init_camera()
         
     def _init_camera(self):
-        if self.camera is not None:
-            self.camera.release()
+        try:
+            if self.camera is not None:
+                self.camera.release()
+                time.sleep(1)  # Wait for camera to fully release
+                
+            self.camera = cv2.VideoCapture(0, cv2.CAP_V4L)
+            if not self.camera.isOpened():
+                raise Exception("Failed to open camera")
+                
+            # Set camera properties
+            self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.camera.set(cv2.CAP_PROP_FPS, 30)
+            self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+            self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Auto exposure
             
-        self.camera = cv2.VideoCapture(0,cv2.CAP_V4L)
-        
-        # Set camera properties
-        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        self.camera.set(cv2.CAP_PROP_FPS, 30)
-        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
-        self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Auto exposure
-        
-        # Wait for camera to initialize
-        time.sleep(2)
-        
-        # Test camera
-        ret, frame = self.camera.read()
-        if not ret:
-            raise Exception("Could not read from camera")
+            # Wait for camera to initialize
+            time.sleep(2)
             
-        print("Camera initialized successfully")
-        
+            # Test camera
+            ret, frame = self.camera.read()
+            if not ret:
+                raise Exception("Could not read from camera")
+                
+            print("Camera initialized successfully")
+            return True
+        except Exception as e:
+            print(f"Error initializing camera: {e}")
+            if self.camera is not None:
+                self.camera.release()
+            self.camera = None
+            return False
+            
     def _load_labels(self):
         try:
             with open(self.labels_path, 'r') as f:
@@ -121,6 +132,10 @@ class ObjectDetector:
         return frame, detections
     
     def get_frame(self):
+        if self.camera is None or not self.camera.isOpened():
+            if not self._init_camera():
+                return None, []
+                
         ret, frame = self.camera.read()
         if not ret:
             print("Failed to grab frame")
@@ -134,8 +149,10 @@ class ObjectDetector:
         return frame, detections
     
     def release(self):
-        if self.camera.isOpened():
+        if self.camera is not None and self.camera.isOpened():
             self.camera.release()
+            self.camera = None
+            print("Camera released")
 
     def set_confidence_threshold(self, threshold):
         self.confidence_threshold = threshold 
