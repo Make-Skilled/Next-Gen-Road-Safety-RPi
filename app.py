@@ -23,10 +23,11 @@ login_manager.login_view = 'login'
 
 # Global variables for detection settings
 confidence_threshold = 0.3
-frame_skip = 4  # Process every 4th frame to reduce CPU load
+frame_skip = 8  # Process every 8th frame to reduce CPU load
 frame_count = 0
 last_processing_time = 0
-min_processing_interval = 0.1  # Minimum time between processing frames (100ms)
+min_processing_interval = 0.2  # Minimum time between processing frames (200ms)
+detection_enabled = True  # Global flag to toggle detection
 
 # Load YOLOv8 model
 try:
@@ -80,10 +81,10 @@ def check_system_resources():
     return True
 
 def detect_objects(frame):
-    global frame_count, last_processing_time
+    global frame_count, last_processing_time, detection_enabled
     
-    if frame is None:
-        return None, []
+    if frame is None or not detection_enabled:
+        return frame, []
         
     # Skip frames to reduce CPU load
     frame_count += 1
@@ -103,7 +104,7 @@ def detect_objects(frame):
             return frame, []
             
         # Resize frame for faster processing
-        frame_resized = cv2.resize(frame, (256, 256))  # Reduced size for faster processing
+        frame_resized = cv2.resize(frame, (224, 224))  # Further reduced size for faster processing
         
         # Run YOLOv8 inference with optimizations
         results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
@@ -120,10 +121,10 @@ def detect_objects(frame):
             class_name = results.names[class_id]
             
             # Scale coordinates back to original frame size
-            x1 = int(x1 * width / 256)
-            y1 = int(y1 * height / 256)
-            x2 = int(x2 * width / 256)
-            y2 = int(y2 * height / 256)
+            x1 = int(x1 * width / 224)
+            y1 = int(y1 * height / 224)
+            x2 = int(x2 * width / 224)
+            y2 = int(y2 * height / 224)
             
             # Ensure coordinates are within frame bounds
             x1 = max(0, min(x1, width))
@@ -166,10 +167,10 @@ def get_camera_frame():
             return None, []
             
         # Set camera properties for Raspberry Pi
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        camera.set(cv2.CAP_PROP_FPS, 10)  # Reduced FPS for better performance
-        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer size
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)  # Reduced resolution
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
+        camera.set(cv2.CAP_PROP_FPS, 8)  # Further reduced FPS
+        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
         # Read frame
         ret, frame = camera.read()
@@ -209,16 +210,16 @@ def gen_frames(user_id):
                         db.session.commit()
 
                     # Convert frame to JPEG with reduced quality
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
                     if ret:
                         frame = buffer.tobytes()
                         yield (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                 else:
-                    time.sleep(0.1)  # Reduced sleep time
+                    time.sleep(0.05)  # Further reduced sleep time
             except Exception as e:
                 print(f"Error in gen_frames: {e}")
-                time.sleep(0.5)  # Reduced error sleep time
+                time.sleep(0.2)  # Further reduced error sleep time
 
 # User Model
 class User(UserMixin, db.Model):
@@ -310,6 +311,13 @@ def update_threshold():
     data = request.get_json()
     confidence_threshold = float(data.get('threshold', 0.3))
     return jsonify({'status': 'success'})
+
+@app.route('/toggle_detection', methods=['POST'])
+@login_required
+def toggle_detection():
+    global detection_enabled
+    detection_enabled = not detection_enabled
+    return jsonify({'status': 'success', 'detection_enabled': detection_enabled})
 
 if __name__ == '__main__':
     with app.app_context():
