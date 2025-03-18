@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, Res
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from ultralytics import YOLO
 import cv2
 import numpy as np
 import datetime
@@ -10,6 +11,7 @@ import json
 import time
 import threading
 import atexit
+import psutil
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -21,21 +23,19 @@ login_manager.login_view = 'login'
 
 # Global variables for detection settings
 confidence_threshold = 0.3
-nms_threshold = 0.2
+frame_skip = 2  # Process every nth frame to reduce CPU load
+frame_count = 0
 
-# Load YOLO model
-config_path = "yolov3-tiny.cfg"
-weights_path = "yolov3-tiny.weights"
-
+# Load YOLOv8 model
 try:
-    print("Loading YOLO model...")
-    net = cv2.dnn.readNetFromDarknet(config_path, weights_path)
-    net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-    net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-    print("YOLO model loaded successfully")
+    print("Loading YOLOv8 model...")
+    model = YOLO('yolov8n.pt')  # Load the smallest YOLOv8 model
+    # Optimize model for inference
+    model.fuse()  # Fuse Conv2d + BatchNorm2d layers
+    print("YOLOv8 model loaded successfully")
 except Exception as e:
-    print(f"Error loading YOLO model: {e}")
-    print("Please ensure yolov3-tiny.cfg and yolov3-tiny.weights are in the correct location")
+    print(f"Error loading YOLOv8 model: {e}")
+    print("Please ensure you have internet connection for first-time model download")
     raise
 
 # Load COCO labels
@@ -49,113 +49,82 @@ def load_labels():
 
 labels = load_labels()
 
+def check_system_resources():
+    """Check if system has enough resources to process frame"""
+    cpu_percent = psutil.cpu_percent()
+    memory = psutil.virtual_memory()
+    
+    # Skip processing if CPU or memory usage is too high
+    if cpu_percent > 90 or memory.percent > 90:
+        print(f"System resources low - CPU: {cpu_percent}%, Memory: {memory.percent}%")
+        return False
+    return True
+
 def detect_objects(frame):
+    global frame_count
+    
     if frame is None:
         print("Frame is None in detect_objects")
         return None, []
         
+    # Skip frames to reduce CPU load
+    frame_count += 1
+    if frame_count % frame_skip != 0:
+        return frame, []
+        
     height, width = frame.shape[:2]
-    print(f"Processing frame of size: {width}x{height}")
     
     try:
-        # Preprocess image for better detection
-        # Convert to RGB if needed
-        if len(frame.shape) == 2:
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
-        elif frame.shape[2] == 4:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
-        else:
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        # Check system resources before processing
+        if not check_system_resources():
+            return frame, []
             
-        # Apply slight blur to reduce noise
-        frame = cv2.GaussianBlur(frame, (3, 3), 0)
+        # Resize frame for faster processing
+        frame_resized = cv2.resize(frame, (320, 320))
         
-        # Create blob from image with adjusted parameters
-        blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
-        print("Created blob successfully")
+        # Run YOLOv8 inference with optimizations
+        results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
         
-        net.setInput(blob)
-        print("Set input to network")
-        
-        # Get output layer names
-        layer_names = net.getLayerNames()
-        output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
-        print(f"Output layers: {output_layers}")
-        
-        # Forward pass
-        outputs = net.forward(output_layers)
-        print(f"Forward pass completed. Number of outputs: {len(outputs)}")
-        
-        # Initialize lists for detected objects
-        boxes = []
-        confidences = []
-        class_ids = []
-        
-        # Process each output
-        for output in outputs:
-            for detection in output:
-                scores = detection[5:]
-                class_id = np.argmax(scores)
-                confidence = scores[class_id]
-                
-                # Print top 3 classes and their confidences for debugging
-                top_3_indices = np.argsort(scores)[-3:][::-1]
-                print(f"Top 3 classes: {[labels[i] for i in top_3_indices]}")
-                print(f"Top 3 confidences: {[scores[i] for i in top_3_indices]}")
-                
-                if confidence > confidence_threshold:
-                    print(f"Found detection: {labels[class_id]} with confidence {confidence:.2f}")
-                    # Scale bounding box coordinates back relative to size of image
-                    box = detection[0:4] * np.array([width, height, width, height])
-                    (centerX, centerY, width, height) = box.astype("int")
-                    
-                    # Use center coordinates to derive top and left corner of bounding box
-                    x = int(centerX - (width / 2))
-                    y = int(centerY - (height / 2))
-                    
-                    # Ensure coordinates are within frame bounds
-                    x = max(0, min(x, width))
-                    y = max(0, min(y, height))
-                    width = min(width, frame.shape[1] - x)
-                    height = min(height, frame.shape[0] - y)
-                    
-                    print(f"Drawing box at ({x}, {y}) with size {width}x{height}")
-                    boxes.append([x, y, int(width), int(height)])
-                    confidences.append(float(confidence))
-                    class_ids.append(class_id)
-        
-        print(f"Found {len(boxes)} potential detections")
-        
-        # Apply non-maxima suppression with adjusted threshold
-        indices = cv2.dnn.NMSBoxes(boxes, confidences, confidence_threshold, nms_threshold)
-        print(f"After NMS: {len(indices)} detections")
-        
+        # Initialize list for detections
         detections = []
-        if len(indices) > 0:
-            for i in indices.flatten():
-                detection = {
-                    'object_name': labels[class_ids[i]],
-                    'confidence': confidences[i],
-                    'box': boxes[i],
-                    'timestamp': datetime.datetime.now()
-                }
-                detections.append(detection)
-                
-                # Draw bounding box and label on frame
-                (x, y, w, h) = boxes[i]
-                label = f"{labels[class_ids[i]]}: {confidences[i]:.2f}"
-                
-                print(f"Drawing final box for {label} at ({x}, {y}) with size {w}x{h}")
-                
-                # Draw thicker bounding box
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 3)
-                
-                # Add background to text for better visibility
-                (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                cv2.rectangle(frame, (x, y - text_height - 10), (x + text_width, y), (0, 255, 0), -1)
-                cv2.putText(frame, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-        else:
-            print("No detections passed NMS threshold")
+        
+        # Process detections
+        for box in results.boxes:
+            # Get box coordinates
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            confidence = float(box.conf[0])
+            class_id = int(box.cls[0])
+            class_name = results.names[class_id]
+            
+            # Scale coordinates back to original frame size
+            x1 = int(x1 * width / 320)
+            y1 = int(y1 * height / 320)
+            x2 = int(x2 * width / 320)
+            y2 = int(y2 * height / 320)
+            
+            # Ensure coordinates are within frame bounds
+            x1 = max(0, min(x1, width))
+            y1 = max(0, min(y1, height))
+            x2 = max(0, min(x2, width))
+            y2 = max(0, min(y2, height))
+            
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+            # Add label with background
+            label = f"{class_name}: {confidence:.2f}"
+            (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(frame, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
+            cv2.putText(frame, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+            
+            # Add detection to list
+            detection = {
+                'object_name': class_name,
+                'confidence': confidence,
+                'box': [x1, y1, x2 - x1, y2 - y1],
+                'timestamp': datetime.datetime.now()
+            }
+            detections.append(detection)
         
         return frame, detections
         
@@ -172,10 +141,10 @@ def get_camera_frame():
             print("Failed to open camera")
             return None, []
             
-        # Set camera properties
+        # Set camera properties for Raspberry Pi
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        camera.set(cv2.CAP_PROP_FPS, 30)
+        camera.set(cv2.CAP_PROP_FPS, 15)  # Reduced FPS for better performance
         
         # Read frame
         ret, frame = camera.read()
@@ -185,14 +154,11 @@ def get_camera_frame():
             print("Failed to read frame")
             return None, []
             
-        print("Frame captured successfully")
-            
         # Flip the frame horizontally for a later selfie-view display
         frame = cv2.flip(frame, 1)
         
         # Detect objects
         frame, detections = detect_objects(frame)
-        print(f"Number of detections: {len(detections)}")
         return frame, detections
         
     except Exception as e:
