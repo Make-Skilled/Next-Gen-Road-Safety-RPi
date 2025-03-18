@@ -205,31 +205,42 @@ def detection_thread():
             print(f"Error in detection thread: {e}")
             time.sleep(0.1)
 
-def gen_frames(user_id):
+def gen_frames(user_id, feed_type='camera'):
     """Generate frames for video feed"""
     with app.app_context():
         while True:
             try:
-                # Get latest frame with detections
+                # Get latest frame
                 with frame_lock:
                     if latest_frame is None:
                         time.sleep(0.01)
                         continue
                     frame = latest_frame.copy()
                 
-                with detection_lock:
-                    detections = latest_detections.copy()
-                
-                # Save detections to database
-                if user_id and detections:
+                # For detection feed, add bounding boxes
+                if feed_type == 'detection':
+                    with detection_lock:
+                        detections = latest_detections.copy()
+                    
+                    # Draw detections on frame
                     for detection in detections:
-                        new_detection = Detection(
-                            object_name=detection['object_name'],
-                            confidence=detection['confidence'],
-                            user_id=user_id
-                        )
-                        db.session.add(new_detection)
-                    db.session.commit()
+                        x1, y1, w, h = detection['box']
+                        cv2.rectangle(frame, (x1, y1), (x1 + w, y1 + h), (0, 255, 0), 2)
+                        label = f"{detection['object_name']}: {detection['confidence']:.2f}"
+                        (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                        cv2.rectangle(frame, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
+                        cv2.putText(frame, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                    
+                    # Save detections to database
+                    if user_id and detections:
+                        for detection in detections:
+                            new_detection = Detection(
+                                object_name=detection['object_name'],
+                                confidence=detection['confidence'],
+                                user_id=user_id
+                            )
+                            db.session.add(new_detection)
+                        db.session.commit()
                 
                 # Convert frame to JPEG
                 ret, buffer = cv2.imencode('.jpg', frame, [
@@ -329,7 +340,8 @@ def logout():
 @app.route('/video_feed')
 @login_required
 def video_feed():
-    return Response(gen_frames(current_user.id),
+    feed_type = request.args.get('type', 'camera')
+    return Response(gen_frames(current_user.id, feed_type),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/update_threshold', methods=['POST'])
