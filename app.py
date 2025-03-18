@@ -51,31 +51,28 @@ def init_camera():
             camera.release()
             time.sleep(1)
         
-        # Try different camera indices
-        for index in [0, 1, -1]:
-            try:
-                camera = cv2.VideoCapture(index, cv2.CAP_V4L2)
-                if camera.isOpened():
-                    # Set camera properties
-                    camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                    camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                    camera.set(cv2.CAP_PROP_FPS, 30)
-                    
-                    # Test camera
-                    ret, frame = camera.read()
-                    if ret:
-                        print(f"Camera initialized successfully on index {index}")
-                        camera_initialized = True
-                        return True
-                    else:
-                        camera.release()
-                        print(f"Failed to read from camera on index {index}")
-            except Exception as e:
-                print(f"Error trying camera index {index}: {e}")
-                if camera is not None:
-                    camera.release()
+        # Try to open camera without CAP_V4L2
+        camera = cv2.VideoCapture(0)
         
-        raise Exception("Failed to initialize camera on any index")
+        if not camera.isOpened():
+            print("Failed to open camera")
+            return False
+            
+        # Set camera properties
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        camera.set(cv2.CAP_PROP_FPS, 30)
+        
+        # Test camera
+        ret, frame = camera.read()
+        if not ret:
+            print("Failed to read from camera")
+            camera.release()
+            return False
+            
+        print("Camera initialized successfully")
+        camera_initialized = True
+        return True
         
     except Exception as e:
         print(f"Error initializing camera: {e}")
@@ -160,12 +157,8 @@ def get_frame():
         
         ret, frame = camera.read()
         if not ret:
-            print("Failed to read frame, attempting to reinitialize camera...")
-            if not init_camera():
-                return None, []
-            ret, frame = camera.read()
-            if not ret:
-                return None, []
+            print("Failed to read frame")
+            return None, []
         
         # Flip the frame horizontally for a later selfie-view display
         frame = cv2.flip(frame, 1)
