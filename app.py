@@ -33,6 +33,8 @@ latest_frame = None  # Latest frame from camera
 latest_detections = []  # Latest detections
 frame_lock = threading.Lock()  # Lock for thread-safe frame access
 detection_lock = threading.Lock()  # Lock for thread-safe detection access
+latest_processed_frame = None
+processed_frame_lock = threading.Lock()
 
 # Load YOLOv8 model
 try:
@@ -158,12 +160,14 @@ def camera_thread():
 
 def detection_thread():
     """Thread for object detection"""
-    global latest_frame, latest_detections, frame_count, last_processing_time
+    global latest_frame, latest_detections, frame_count, last_processing_time, latest_processed_frame
     
     while True:
         try:
             if not detection_enabled:
                 latest_detections = []  # Clear detections when disabled
+                with processed_frame_lock:
+                    latest_processed_frame = None
                 time.sleep(0.1)
                 continue
                 
@@ -201,6 +205,8 @@ def detection_thread():
                 
                 # Process detections
                 detections = []
+                processed_frame = frame.copy()
+                
                 for box in results.boxes:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     confidence = float(box.conf[0])
@@ -219,6 +225,13 @@ def detection_thread():
                     x2 = max(0, min(x2, width))
                     y2 = max(0, min(y2, height))
                     
+                    # Draw bounding box and label on processed frame
+                    cv2.rectangle(processed_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    label = f"{class_name}: {confidence:.2f}"
+                    (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                    cv2.rectangle(processed_frame, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
+                    cv2.putText(processed_frame, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+                    
                     detections.append({
                         'object_name': class_name,
                         'confidence': confidence,
@@ -226,9 +239,11 @@ def detection_thread():
                         'timestamp': datetime.datetime.now()
                     })
                 
-                # Update latest detections
+                # Update latest detections and processed frame
                 with detection_lock:
                     latest_detections = detections
+                with processed_frame_lock:
+                    latest_processed_frame = processed_frame
                 
                 # Save to database in detection thread
                 if detections:
@@ -255,52 +270,21 @@ def detection_thread():
 
 def gen_frames(user_id, feed_type='camera'):
     """Generate frames for video feed"""
-    frame_buffer = None
-    last_detection_time = 0
-    detection_interval = 0.033  # ~30fps for detection overlay
-    
     while True:
         try:
-            current_time = time.time()
-            
-            # Get latest frame
-            with frame_lock:
-                if latest_frame is None:
-                    time.sleep(0.01)
-                    continue
-                frame = latest_frame.copy()
-            
-            # For detection feed, add bounding boxes
+            # Get appropriate frame based on feed type
             if feed_type == 'detection':
-                # Only update frame buffer at specified interval
-                if current_time - last_detection_time >= detection_interval:
-                    frame_buffer = frame.copy()
-                    with detection_lock:
-                        detections = latest_detections.copy() if latest_detections else []
-                    
-                    # Draw detections on frame buffer
-                    for detection in detections:
-                        x1, y1, w, h = detection['box']
-                        x2, y2 = x1 + w, y1 + h
-                        
-                        # Draw bounding box
-                        cv2.rectangle(frame_buffer, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        
-                        # Add label with confidence
-                        label = f"{detection['object_name']}: {detection['confidence']:.2f}"
-                        (text_width, text_height), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
-                        
-                        # Draw label background
-                        cv2.rectangle(frame_buffer, (x1, y1 - text_height - 5), (x1 + text_width, y1), (0, 255, 0), -1)
-                        
-                        # Draw label text
-                        cv2.putText(frame_buffer, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-                    
-                    last_detection_time = current_time
-                
-                # Use frame buffer for detection feed
-                if frame_buffer is not None:
-                    frame = frame_buffer
+                with processed_frame_lock:
+                    if latest_processed_frame is None:
+                        time.sleep(0.01)
+                        continue
+                    frame = latest_processed_frame.copy()
+            else:
+                with frame_lock:
+                    if latest_frame is None:
+                        time.sleep(0.01)
+                        continue
+                    frame = latest_frame.copy()
             
             # Convert frame to JPEG with valid parameters
             encode_params = [
