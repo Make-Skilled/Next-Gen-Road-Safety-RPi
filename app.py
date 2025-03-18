@@ -47,11 +47,12 @@ labels = load_labels()
 def init_camera():
     global camera, camera_initialized
     try:
+        # First, ensure any existing camera is properly released
         if camera is not None:
             camera.release()
             time.sleep(1)
         
-        # Try to open camera without CAP_V4L2
+        # Try to open camera with basic settings
         camera = cv2.VideoCapture(0)
         
         if not camera.isOpened():
@@ -62,17 +63,21 @@ def init_camera():
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         camera.set(cv2.CAP_PROP_FPS, 30)
+        camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+        camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # Auto exposure
         
-        # Test camera
-        ret, frame = camera.read()
-        if not ret:
-            print("Failed to read from camera")
-            camera.release()
-            return False
+        # Test camera with multiple attempts
+        for _ in range(3):  # Try 3 times
+            ret, frame = camera.read()
+            if ret:
+                print("Camera initialized successfully")
+                camera_initialized = True
+                return True
+            time.sleep(0.1)  # Wait a bit between attempts
             
-        print("Camera initialized successfully")
-        camera_initialized = True
-        return True
+        print("Failed to read from camera after multiple attempts")
+        camera.release()
+        return False
         
     except Exception as e:
         print(f"Error initializing camera: {e}")
@@ -149,23 +154,27 @@ def detect_objects(frame):
 def get_frame():
     global camera, camera_initialized
     try:
+        # Check if camera needs reinitialization
         if camera is None or not camera.isOpened():
             print("Camera not available, attempting to initialize...")
             if not init_camera():
                 print("Failed to initialize camera")
                 return None, []
         
-        ret, frame = camera.read()
-        if not ret:
-            print("Failed to read frame")
-            return None, []
+        # Try to read frame with multiple attempts
+        for _ in range(3):
+            ret, frame = camera.read()
+            if ret:
+                # Flip the frame horizontally for a later selfie-view display
+                frame = cv2.flip(frame, 1)
+                
+                # Detect objects
+                frame, detections = detect_objects(frame)
+                return frame, detections
+            time.sleep(0.1)
         
-        # Flip the frame horizontally for a later selfie-view display
-        frame = cv2.flip(frame, 1)
-        
-        # Detect objects
-        frame, detections = detect_objects(frame)
-        return frame, detections
+        print("Failed to read frame after multiple attempts")
+        return None, []
         
     except Exception as e:
         print(f"Error in get_frame: {e}")
@@ -210,8 +219,8 @@ def gen_frames():
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             else:
-                print("No frame received")
-                time.sleep(0.1)
+                print("No frame received, waiting...")
+                time.sleep(0.5)  # Increased wait time
         except Exception as e:
             print(f"Error in gen_frames: {e}")
             time.sleep(1)
