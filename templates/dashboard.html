@@ -1,49 +1,198 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <h2 class="text-2xl font-bold mb-6">Detection History</h2>
+<div class="container mt-4">
+    <div class="row">
+        <!-- Video Feed Section -->
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Live Camera Feed</h5>
+                    <div class="video-container">
+                        <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Video Feed" class="img-fluid">
+                        <div id="detectionOverlay" class="detection-overlay"></div>
+                        <div id="loadingOverlay" class="loading-overlay">
+                            <div class="spinner-border text-light" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="errorMessage" class="error-message" style="display: none;">
+                        Camera not available. Please check your camera connection and refresh the page.
+                    </div>
+                </div>
+            </div>
+        </div>
 
-    {% if detections %}
-        <div class="bg-white shadow-md rounded-lg overflow-hidden">
-            <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Timestamp
-                        </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Object
-                        </th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Confidence
-                        </th>
-                    </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                    {% for detection in detections %}
-                    <tr>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {{ detection.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {{ detection.object_name }}
-                        </td>
-                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                            {{ "%.2f"|format(detection.confidence * 100) }}%
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+        <!-- Detection Settings and Latest Detection -->
+        <div class="col-md-4">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">Detection Settings</h5>
+                    <div class="mb-3">
+                        <label for="confidenceThreshold" class="form-label">Confidence Threshold</label>
+                        <input type="range" class="form-range" id="confidenceThreshold" min="0" max="1" step="0.1" value="0.5">
+                        <div class="text-center" id="thresholdValue">0.5</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Latest Detection</h5>
+                    <div id="latestDetection">
+                        <p class="text-muted">No detections yet</p>
+                    </div>
+                </div>
+            </div>
         </div>
-    {% else %}
-        <div class="text-center py-8">
-            <p class="text-gray-600">No detections found. Start detecting objects to see your history.</p>
-            <a href="{{ url_for('detect') }}" class="mt-4 inline-block bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
-                Start Detection
-            </a>
+    </div>
+
+    <!-- Recent Detections Table -->
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Recent Detections</h5>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Object</th>
+                                    <th>Confidence</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for detection in detections %}
+                                <tr>
+                                    <td>{{ detection.object_name }}</td>
+                                    <td>{{ "%.1f"|format(detection.confidence * 100) }}%</td>
+                                    <td>{{ detection.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
-    {% endif %}
+    </div>
 </div>
+
+<style>
+    .video-container {
+        position: relative;
+        width: 100%;
+        margin: 0 auto;
+    }
+    #videoFeed {
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .detection-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+    }
+    .detection-box {
+        position: absolute;
+        border: 2px solid #00ff00;
+        border-radius: 4px;
+        padding: 2px;
+        color: #00ff00;
+        font-weight: bold;
+        background-color: rgba(0, 0, 0, 0.5);
+    }
+    .loading-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.7);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        font-size: 1.2em;
+        border-radius: 8px;
+    }
+    .error-message {
+        color: #dc3545;
+        text-align: center;
+        margin: 20px 0;
+    }
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const videoFeed = document.getElementById('videoFeed');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const errorMessage = document.getElementById('errorMessage');
+        const detectionOverlay = document.getElementById('detectionOverlay');
+        const latestDetection = document.getElementById('latestDetection');
+        const confidenceThreshold = document.getElementById('confidenceThreshold');
+        const thresholdValue = document.getElementById('thresholdValue');
+
+        // Handle video feed loading
+        videoFeed.onload = function() {
+            loadingOverlay.style.display = 'none';
+            errorMessage.style.display = 'none';
+        };
+
+        videoFeed.onerror = function() {
+            loadingOverlay.style.display = 'none';
+            errorMessage.style.display = 'block';
+        };
+
+        // WebSocket connection for real-time updates
+        let ws = null;
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${window.location.host}/ws/detection`);
+            
+            ws.onmessage = function(event) {
+                const detection = JSON.parse(event.data);
+                updateLatestDetection(detection);
+            };
+
+            ws.onclose = function() {
+                console.log('WebSocket connection closed');
+                setTimeout(connectWebSocket, 1000); // Reconnect after 1 second
+            };
+        }
+
+        function updateLatestDetection(detection) {
+            const confidence = (detection.confidence * 100).toFixed(1);
+            latestDetection.innerHTML = `
+                <p><strong>Object:</strong> ${detection.object_name}</p>
+                <p><strong>Confidence:</strong> ${confidence}%</p>
+                <p><strong>Time:</strong> ${new Date(detection.timestamp).toLocaleTimeString()}</p>
+            `;
+        }
+
+        // Confidence threshold handling
+        confidenceThreshold.addEventListener('input', function() {
+            const value = this.value;
+            thresholdValue.textContent = value;
+            
+            fetch('/update_threshold', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ threshold: value })
+            })
+            .catch(error => console.error('Error updating threshold:', error));
+        });
+
+        // Initialize WebSocket connection
+        connectWebSocket();
+    });
+</script>
 {% endblock %} 

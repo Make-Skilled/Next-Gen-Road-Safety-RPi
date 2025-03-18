@@ -30,11 +30,13 @@ def init_detector():
             detector.release()  # Release the camera before reinitializing
         detector = ObjectDetector()
         print("Detector initialized successfully")
+        return True
     except Exception as e:
         print(f"Error initializing detector: {e}")
         if detector is not None:
             detector.release()
         detector = None
+        return False
 
 # Initialize detector
 init_detector()
@@ -97,6 +99,8 @@ def gen_frames():
 
 @app.route('/')
 def index():
+    if detector is None:
+        init_detector()  # Try to initialize detector if not already initialized
     return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -141,6 +145,11 @@ def signup():
 @app.route('/dashboard')
 @login_required
 def dashboard():
+    global detector
+    if detector is None:
+        if not init_detector():  # Try to initialize detector if not already initialized
+            flash('Camera not available. Please check your camera connection.')
+            return redirect(url_for('index'))
     detections = Detection.query.filter_by(user_id=current_user.id).order_by(Detection.timestamp.desc()).all()
     return render_template('dashboard.html', detections=detections)
 
@@ -171,12 +180,7 @@ def detect():
 def video_feed():
     global detector
     if detector is None:
-        try:
-            init_detector()  # Try to reinitialize the detector
-            if detector is None:
-                return "Camera not available", 503
-        except Exception as e:
-            print(f"Error initializing detector in video_feed: {e}")
+        if not init_detector():
             return "Camera not available", 503
     return Response(gen_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
