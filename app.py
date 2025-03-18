@@ -23,11 +23,12 @@ login_manager.login_view = 'login'
 
 # Global variables for detection settings
 confidence_threshold = 0.3
-frame_skip = 8  # Process every 8th frame to reduce CPU load
+frame_skip = 12  # Process every 12th frame to reduce CPU load
 frame_count = 0
 last_processing_time = 0
-min_processing_interval = 0.2  # Minimum time between processing frames (200ms)
+min_processing_interval = 0.3  # Minimum time between processing frames (300ms)
 detection_enabled = True  # Global flag to toggle detection
+camera = None  # Global camera instance
 
 # Load YOLOv8 model
 try:
@@ -80,6 +81,23 @@ def check_system_resources():
         return False
     return True
 
+def init_camera():
+    global camera
+    if camera is None:
+        camera = cv2.VideoCapture(0)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Increased resolution for better quality
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        camera.set(cv2.CAP_PROP_FPS, 15)  # Increased FPS for smoother video
+        camera.set(cv2.CAP_PROP_BUFFERSIZE, 3)  # Increased buffer for smoother video
+        camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)  # Disable autofocus for faster frame capture
+        camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # Disable auto exposure for faster frame capture
+
+def release_camera():
+    global camera
+    if camera is not None:
+        camera.release()
+        camera = None
+
 def detect_objects(frame):
     global frame_count, last_processing_time, detection_enabled
     
@@ -104,7 +122,7 @@ def detect_objects(frame):
             return frame, []
             
         # Resize frame for faster processing
-        frame_resized = cv2.resize(frame, (224, 224))  # Further reduced size for faster processing
+        frame_resized = cv2.resize(frame, (192, 192))  # Further reduced size for faster processing
         
         # Run YOLOv8 inference with optimizations
         results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
@@ -121,10 +139,10 @@ def detect_objects(frame):
             class_name = results.names[class_id]
             
             # Scale coordinates back to original frame size
-            x1 = int(x1 * width / 224)
-            y1 = int(y1 * height / 224)
-            x2 = int(x2 * width / 224)
-            y2 = int(y2 * height / 224)
+            x1 = int(x1 * width / 192)
+            y1 = int(y1 * height / 192)
+            x2 = int(x2 * width / 192)
+            y2 = int(y2 * height / 192)
             
             # Ensure coordinates are within frame bounds
             x1 = max(0, min(x1, width))
@@ -158,24 +176,14 @@ def detect_objects(frame):
         return frame, []
 
 def get_camera_frame():
+    global camera
     try:
-        # Create a new camera instance for each frame
-        camera = cv2.VideoCapture(0)
-        
-        if not camera.isOpened():
-            print("Failed to open camera")
-            return None, []
-            
-        # Set camera properties for Raspberry Pi
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, 480)  # Reduced resolution
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
-        camera.set(cv2.CAP_PROP_FPS, 8)  # Further reduced FPS
-        camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Initialize camera if needed
+        if camera is None:
+            init_camera()
         
         # Read frame
         ret, frame = camera.read()
-        camera.release()  # Release camera immediately after reading
-        
         if not ret:
             return None, []
             
@@ -193,33 +201,41 @@ def get_camera_frame():
 def gen_frames(user_id):
     # Create a new application context for this thread
     with app.app_context():
-        while True:
-            try:
-                frame, detections = get_camera_frame()
-                
-                if frame is not None:
-                    # Save detections to database if user_id is provided
-                    if user_id and detections:
-                        for detection in detections:
-                            new_detection = Detection(
-                                object_name=detection['object_name'],
-                                confidence=detection['confidence'],
-                                user_id=user_id
-                            )
-                            db.session.add(new_detection)
-                        db.session.commit()
+        try:
+            init_camera()  # Initialize camera at the start
+            while True:
+                try:
+                    frame, detections = get_camera_frame()
+                    
+                    if frame is not None:
+                        # Save detections to database if user_id is provided
+                        if user_id and detections:
+                            for detection in detections:
+                                new_detection = Detection(
+                                    object_name=detection['object_name'],
+                                    confidence=detection['confidence'],
+                                    user_id=user_id
+                                )
+                                db.session.add(new_detection)
+                            db.session.commit()
 
-                    # Convert frame to JPEG with reduced quality
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
-                    if ret:
-                        frame = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                else:
-                    time.sleep(0.05)  # Further reduced sleep time
-            except Exception as e:
-                print(f"Error in gen_frames: {e}")
-                time.sleep(0.2)  # Further reduced error sleep time
+                        # Convert frame to JPEG with better quality
+                        ret, buffer = cv2.imencode('.jpg', frame, [
+                            cv2.IMWRITE_JPEG_QUALITY, 85,  # Increased quality
+                            cv2.IMWRITE_JPEG_OPTIMIZE, 1,  # Enable optimization
+                            cv2.IMWRITE_JPEG_SAMPLING_FACTOR, 422  # Use 4:2:2 chroma subsampling
+                        ])
+                        if ret:
+                            frame = buffer.tobytes()
+                            yield (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                    else:
+                        time.sleep(0.01)  # Minimal sleep time
+                except Exception as e:
+                    print(f"Error in gen_frames: {e}")
+                    time.sleep(0.1)  # Reduced error sleep time
+        finally:
+            release_camera()  # Ensure camera is released when done
 
 # User Model
 class User(UserMixin, db.Model):
@@ -318,6 +334,9 @@ def toggle_detection():
     global detection_enabled
     detection_enabled = not detection_enabled
     return jsonify({'status': 'success', 'detection_enabled': detection_enabled})
+
+# Register cleanup function
+atexit.register(release_camera)
 
 if __name__ == '__main__':
     with app.app_context():
