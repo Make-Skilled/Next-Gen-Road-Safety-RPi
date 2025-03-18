@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPi Object Detection</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Add any custom styles here */
+    </style>
+</head>
+<body class="bg-gray-100">
+    <nav class="bg-blue-600 text-white p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="{{ url_for('index') }}" class="text-2xl font-bold">RPi Detection</a>
+            <div class="space-x-4">
+                {% if current_user.is_authenticated %}
+                    <a href="{{ url_for('dashboard') }}" class="hover:text-gray-200">Dashboard</a>
+                    <a href="{{ url_for('detect') }}" class="hover:text-gray-200">Detect</a>
+                    <a href="{{ url_for('logout') }}" class="hover:text-gray-200">Logout</a>
+                {% else %}
+                    <a href="{{ url_for('login') }}" class="hover:text-gray-200">Login</a>
+                    <a href="{{ url_for('signup') }}" class="hover:text-gray-200">Sign Up</a>
+                {% endif %}
+            </div>
+        </div>
+    </nav>
+
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            <div class="container mx-auto mt-4">
+                {% for message in messages %}
+                    <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <main class="container mx-auto p-4">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html> 
