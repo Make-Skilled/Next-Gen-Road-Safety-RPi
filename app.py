@@ -281,9 +281,8 @@ def signup():
 def dashboard():
     global camera_initialized
     if not camera_initialized:
-        if not init_camera():
-            flash('Camera not available. Please check your camera connection.')
-            return redirect(url_for('index'))
+        flash('Camera not available. Please check your camera connection.')
+        return redirect(url_for('index'))
     detections = Detection.query.filter_by(user_id=current_user.id).order_by(Detection.timestamp.desc()).all()
     return render_template('dashboard.html', detections=detections)
 
