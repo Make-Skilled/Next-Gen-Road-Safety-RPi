@@ -470,6 +470,16 @@ def ws_detection():
         ws.close()
     return ''
 
+@app.route('/detect')
+@login_required
+def detect():
+    global camera_initialized
+    if not camera_initialized:
+        if not init_detector():
+            flash('Camera not available. Please check your camera connection.')
+            return redirect(url_for('index'))
+    return render_template('detect.html')
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
