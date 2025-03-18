@@ -24,6 +24,7 @@ login_manager.login_view = 'login'
 detector = None
 camera_lock = threading.Lock()
 camera_initialized = False
+camera_index = None  # Store the successful camera index
 
 class ObjectDetector:
     def __init__(self, confidence_threshold=0.5):
@@ -234,33 +235,91 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 def init_detector():
-    global detector, camera_initialized
+    global detector, camera_initialized, camera_index
     try:
         if detector is not None:
-            detector.release()  # Release the camera before reinitializing
-            time.sleep(1)  # Wait for camera to fully release
+            # If we already have a working camera, don't reinitialize
+            if detector.camera is not None and detector.camera.isOpened():
+                print("Camera already initialized and working")
+                return True
+                
+            # If we have a previous successful index, try that first
+            if camera_index is not None:
+                print(f"Trying to reinitialize camera with previous successful index {camera_index}")
+                detector.release()
+                time.sleep(1)
+                detector.camera = cv2.VideoCapture(camera_index)
+                if detector.camera.isOpened():
+                    ret, frame = detector.camera.read()
+                    if ret:
+                        print(f"Successfully reinitialized camera with index {camera_index}")
+                        return True
+                    detector.camera.release()
+                    detector.camera = None
             
-        detector = ObjectDetector()
-        if detector.camera is None:
-            raise Exception("Failed to initialize camera")
+            # If previous index failed or doesn't exist, try all indices
+            print("Trying to find working camera...")
+            for index in [0, 1, -1]:
+                try:
+                    print(f"Trying to open camera with index {index}...")
+                    detector.camera = cv2.VideoCapture(index)
+                    
+                    if detector.camera.isOpened():
+                        # Set camera properties
+                        detector.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        detector.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        detector.camera.set(cv2.CAP_PROP_FPS, 30)
+                        detector.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+                        detector.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
+                        
+                        # Wait for camera to initialize
+                        time.sleep(2)
+                        
+                        # Test camera
+                        ret, frame = detector.camera.read()
+                        if ret:
+                            print(f"Successfully opened camera with index {index}")
+                            camera_index = index  # Store the successful index
+                            camera_initialized = True
+                            return True
+                        else:
+                            print(f"Could not read from camera with index {index}")
+                            detector.camera.release()
+                            detector.camera = None
+                    else:
+                        print(f"Failed to open camera with index {index}")
+                except Exception as e:
+                    print(f"Error trying camera index {index}: {e}")
+                    if detector.camera is not None:
+                        detector.camera.release()
+                        detector.camera = None
             
-        print("Detector initialized successfully")
-        camera_initialized = True
-        return True
+            raise Exception("Failed to open camera with any available index")
+            
+        else:
+            # Create new detector if none exists
+            detector = ObjectDetector()
+            if detector.camera is not None and detector.camera.isOpened():
+                camera_initialized = True
+                return True
+            raise Exception("Failed to initialize detector")
+            
     except Exception as e:
         print(f"Error initializing detector: {e}")
         if detector is not None:
             detector.release()
         detector = None
         camera_initialized = False
+        camera_index = None
         return False
 
 def cleanup_detector():
-    global detector, camera_initialized
+    global detector, camera_initialized, camera_index
     if detector is not None:
         detector.release()
         detector = None
         camera_initialized = False
+        camera_index = None
         print("Detector cleaned up")
 
 # Initialize detector at startup
@@ -307,8 +366,10 @@ def gen_frames():
 
 @app.route('/')
 def index():
-    if detector is None:
-        init_detector()  # Try to initialize detector if not already initialized
+    global camera_initialized
+    if not camera_initialized:
+        if not init_detector():
+            flash('Camera not available. Please check your camera connection.')
     return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -353,8 +414,8 @@ def signup():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    global detector, camera_initialized
-    if not camera_initialized or detector is None:
+    global camera_initialized
+    if not camera_initialized:
         if not init_detector():
             flash('Camera not available. Please check your camera connection.')
             return redirect(url_for('index'))
@@ -370,8 +431,8 @@ def logout():
 @app.route('/video_feed')
 @login_required
 def video_feed():
-    global detector, camera_initialized
-    if not camera_initialized or detector is None:
+    global camera_initialized
+    if not camera_initialized:
         if not init_detector():
             return "Camera not available", 503
     return Response(gen_frames(),

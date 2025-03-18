@@ -33,7 +33,7 @@ class ObjectDetector:
                 time.sleep(1)  # Wait for camera to fully release
                 
             # Try to open the camera
-            self.camera = cv2.VideoCapture(0, cv2.CAP_V4L)
+            self.camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
             if not self.camera.isOpened():
                 print("Failed to open camera, trying alternative method...")
                 self.camera = cv2.VideoCapture(0)  # Try without CAP_V4L
