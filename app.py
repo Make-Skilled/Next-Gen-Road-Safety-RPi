@@ -138,19 +138,19 @@ def get_camera_frame():
         print(f"Error in get_camera_frame: {e}")
         return None, []
 
-def gen_frames():
+def gen_frames(user_id):
     while True:
         try:
             frame, detections = get_camera_frame()
             
             if frame is not None:
-                # Save detections to database if user is logged in
-                if current_user.is_authenticated and detections:
+                # Save detections to database if user_id is provided
+                if user_id and detections:
                     for detection in detections:
                         new_detection = Detection(
                             object_name=detection['object_name'],
                             confidence=detection['confidence'],
-                            user_id=current_user.id
+                            user_id=user_id
                         )
                         db.session.add(new_detection)
                     db.session.commit()
@@ -248,7 +248,7 @@ def logout():
 @app.route('/video_feed')
 @login_required
 def video_feed():
-    return Response(gen_frames(),
+    return Response(gen_frames(current_user.id),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/update_threshold', methods=['POST'])
