@@ -23,9 +23,10 @@ login_manager.login_view = 'login'
 # Global variables for camera handling
 detector = None
 camera_lock = threading.Lock()
+camera_initialized = False
 
 def init_detector():
-    global detector
+    global detector, camera_initialized
     try:
         if detector is not None:
             detector.release()  # Release the camera before reinitializing
@@ -36,19 +37,22 @@ def init_detector():
             raise Exception("Failed to initialize camera")
             
         print("Detector initialized successfully")
+        camera_initialized = True
         return True
     except Exception as e:
         print(f"Error initializing detector: {e}")
         if detector is not None:
             detector.release()
         detector = None
+        camera_initialized = False
         return False
 
 def cleanup_detector():
-    global detector
+    global detector, camera_initialized
     if detector is not None:
         detector.release()
         detector = None
+        camera_initialized = False
         print("Detector cleaned up")
 
 # Initialize detector at startup
@@ -78,8 +82,8 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 def gen_frames():
-    global detector
-    if detector is None:
+    global detector, camera_initialized
+    if not camera_initialized or detector is None:
         print("Detector not initialized")
         return
         
@@ -161,9 +165,9 @@ def signup():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    global detector
-    if detector is None:
-        if not init_detector():  # Try to initialize detector if not already initialized
+    global detector, camera_initialized
+    if not camera_initialized or detector is None:
+        if not init_detector():
             flash('Camera not available. Please check your camera connection.')
             return redirect(url_for('index'))
     detections = Detection.query.filter_by(user_id=current_user.id).order_by(Detection.timestamp.desc()).all()
@@ -194,8 +198,8 @@ def detect():
 @app.route('/video_feed')
 @login_required
 def video_feed():
-    global detector
-    if detector is None:
+    global detector, camera_initialized
+    if not camera_initialized or detector is None:
         if not init_detector():
             return "Camera not available", 503
     return Response(gen_frames(),

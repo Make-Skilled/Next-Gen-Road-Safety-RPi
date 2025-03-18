@@ -27,13 +27,18 @@ class ObjectDetector:
         
     def _init_camera(self):
         try:
+            # First, try to release any existing camera
             if self.camera is not None:
                 self.camera.release()
                 time.sleep(1)  # Wait for camera to fully release
                 
+            # Try to open the camera
             self.camera = cv2.VideoCapture(0, cv2.CAP_V4L)
             if not self.camera.isOpened():
-                raise Exception("Failed to open camera")
+                print("Failed to open camera, trying alternative method...")
+                self.camera = cv2.VideoCapture(0)  # Try without CAP_V4L
+                if not self.camera.isOpened():
+                    raise Exception("Failed to open camera with both methods")
                 
             # Set camera properties
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -132,27 +137,45 @@ class ObjectDetector:
         return frame, detections
     
     def get_frame(self):
-        if self.camera is None or not self.camera.isOpened():
-            if not self._init_camera():
-                return None, []
-                
-        ret, frame = self.camera.read()
-        if not ret:
-            print("Failed to grab frame")
-            return None, []
+        try:
+            # Check if camera needs reinitialization
+            if self.camera is None or not self.camera.isOpened():
+                print("Camera not available, attempting to reinitialize...")
+                if not self._init_camera():
+                    print("Failed to reinitialize camera")
+                    return None, []
+                    
+            # Try to read frame
+            ret, frame = self.camera.read()
+            if not ret:
+                print("Failed to grab frame, attempting to reinitialize camera...")
+                if not self._init_camera():
+                    print("Failed to reinitialize camera after frame grab failure")
+                    return None, []
+                ret, frame = self.camera.read()
+                if not ret:
+                    print("Still failed to grab frame after reinitialization")
+                    return None, []
+                    
+            # Flip the frame horizontally for a later selfie-view display
+            frame = cv2.flip(frame, 1)
             
-        # Flip the frame horizontally for a later selfie-view display
-        frame = cv2.flip(frame, 1)
-        
-        # Detect objects
-        frame, detections = self.detect_objects(frame)
-        return frame, detections
+            # Detect objects
+            frame, detections = self.detect_objects(frame)
+            return frame, detections
+            
+        except Exception as e:
+            print(f"Error in get_frame: {e}")
+            return None, []
     
     def release(self):
-        if self.camera is not None and self.camera.isOpened():
-            self.camera.release()
-            self.camera = None
-            print("Camera released")
+        try:
+            if self.camera is not None and self.camera.isOpened():
+                self.camera.release()
+                self.camera = None
+                print("Camera released successfully")
+        except Exception as e:
+            print(f"Error releasing camera: {e}")
 
     def set_confidence_threshold(self, threshold):
         self.confidence_threshold = threshold 
