@@ -279,12 +279,12 @@ def gen_frames(user_id, feed_type='camera'):
                             db.session.add(new_detection)
                         db.session.commit()
                 
-                # Convert frame to JPEG
-                ret, buffer = cv2.imencode('.jpg', frame, [
+                # Convert frame to JPEG with valid parameters
+                encode_params = [
                     cv2.IMWRITE_JPEG_QUALITY, 85,
-                    cv2.IMWRITE_JPEG_OPTIMIZE, 1,
-                    cv2.IMWRITE_JPEG_SAMPLING_FACTOR, 422
-                ])
+                    cv2.IMWRITE_JPEG_OPTIMIZE, 1
+                ]
+                ret, buffer = cv2.imencode('.jpg', frame, encode_params)
                 
                 if ret:
                     frame = buffer.tobytes()
