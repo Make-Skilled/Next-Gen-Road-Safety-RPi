@@ -39,14 +39,12 @@ try:
             # Try downloading the model first
             from ultralytics import download
             print("Downloading model...")
+            # Download the smallest model (nano)
             download(url='https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt', dir='.')
             model = YOLO('yolov8n.pt')
         except Exception as e2:
             print(f"Second attempt failed: {e2}")
-            # Try loading with torch directly
-            import torch
-            print("Loading model with torch...")
-            model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
+            raise Exception("Failed to load YOLOv8 model. Please ensure you have enough disk space and internet connection.")
     
     # Optimize model for inference
     if hasattr(model, 'fuse'):
@@ -101,33 +99,19 @@ def detect_objects(frame):
         # Resize frame for faster processing
         frame_resized = cv2.resize(frame, (320, 320))
         
-        # Run inference based on model type
-        if isinstance(model, YOLO):
-            # YOLOv8 inference
-            results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
-            boxes = results.boxes
-        else:
-            # YOLOv5 inference
-            results = model(frame_resized)
-            boxes = results.xyxy[0]  # Get boxes in xyxy format
+        # Run YOLOv8 inference with optimizations
+        results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
         
         # Initialize list for detections
         detections = []
         
         # Process detections
-        for box in boxes:
-            if isinstance(model, YOLO):
-                # YOLOv8 format
-                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                confidence = float(box.conf[0])
-                class_id = int(box.cls[0])
-                class_name = results.names[class_id]
-            else:
-                # YOLOv5 format
-                x1, y1, x2, y2, conf, cls = box.cpu().numpy()
-                confidence = float(conf)
-                class_id = int(cls)
-                class_name = model.names[class_id]
+        for box in results.boxes:
+            # Get box coordinates
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            confidence = float(box.conf[0])
+            class_id = int(box.cls[0])
+            class_name = results.names[class_id]
             
             # Scale coordinates back to original frame size
             x1 = int(x1 * width / 320)
