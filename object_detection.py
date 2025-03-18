@@ -23,15 +23,23 @@ class ObjectDetector:
         
         # Initialize camera with specific settings for Raspberry Pi
         self.camera = cv2.VideoCapture(0)
+        
+        # Set camera properties
         self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         self.camera.set(cv2.CAP_PROP_FPS, 30)
+        self.camera.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+        self.camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # Auto exposure
         
         # Wait for camera to initialize
         time.sleep(2)
         
-        if not self.camera.isOpened():
-            raise Exception("Could not open camera")
+        # Test camera
+        ret, frame = self.camera.read()
+        if not ret:
+            raise Exception("Could not read from camera")
+            
+        print("Camera initialized successfully")
         
     def _load_labels(self):
         try:

@@ -9,6 +9,7 @@ from object_detection import ObjectDetector
 import json
 from simple_websocket import Server
 import time
+import threading
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this to a secure secret key
@@ -18,12 +19,21 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Initialize object detector
-try:
-    detector = ObjectDetector()
-except Exception as e:
-    print(f"Error initializing detector: {e}")
-    detector = None
+# Global variables for camera handling
+detector = None
+camera_lock = threading.Lock()
+
+def init_detector():
+    global detector
+    try:
+        detector = ObjectDetector()
+        print("Detector initialized successfully")
+    except Exception as e:
+        print(f"Error initializing detector: {e}")
+        detector = None
+
+# Initialize detector
+init_detector()
 
 # User Model
 class User(UserMixin, db.Model):
@@ -46,13 +56,16 @@ def load_user(user_id):
     return User.query.get(int(user_id))
 
 def gen_frames():
+    global detector
     if detector is None:
         print("Detector not initialized")
         return
         
     while True:
         try:
-            frame, detections = detector.get_frame()
+            with camera_lock:
+                frame, detections = detector.get_frame()
+                
             if frame is not None:
                 # Save detections to database if user is logged in
                 if current_user.is_authenticated and detections:
@@ -136,9 +149,12 @@ def logout():
 @app.route('/detect')
 @login_required
 def detect():
+    global detector
     if detector is None:
-        flash('Camera not available. Please check your camera connection.')
-        return redirect(url_for('dashboard'))
+        init_detector()  # Try to reinitialize the detector
+        if detector is None:
+            flash('Camera not available. Please check your camera connection.')
+            return redirect(url_for('dashboard'))
     return render_template('detect.html')
 
 @app.route('/video_feed')
@@ -167,7 +183,8 @@ def ws_detection():
     ws = Server(request.environ)
     try:
         while True:
-            _, detections = detector.get_frame()
+            with camera_lock:
+                _, detections = detector.get_frame()
             if detections:
                 # Send only the latest detection
                 latest = detections[-1]

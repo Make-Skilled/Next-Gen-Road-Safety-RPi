@@ -1,158 +1,173 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <div class="max-w-4xl mx-auto">
-        <h2 class="text-2xl font-bold mb-6">Object Detection</h2>
-
-        <div class="bg-white rounded-lg shadow-md p-6">
-            <div class="aspect-w-16 aspect-h-9 mb-6 relative">
-                <div id="camera-loading" class="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
-                    <div class="text-center">
-                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-                        <p class="mt-2 text-gray-600">Initializing camera...</p>
-                    </div>
-                </div>
-                <div id="camera-error" class="hidden absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
-                    <div class="text-center">
-                        <svg class="mx-auto h-12 w-12 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                        </svg>
-                        <p class="mt-2 text-gray-600">Camera not available</p>
-                        <p class="text-sm text-gray-500">Please check your camera connection</p>
-                    </div>
-                </div>
-                <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Video Feed" class="rounded-lg w-full h-full object-cover">
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="bg-gray-50 p-4 rounded-lg">
-                    <h3 class="text-lg font-semibold mb-2">Latest Detection</h3>
-                    <div id="latest-detection" class="text-gray-700">
-                        <p class="text-sm">Waiting for detection...</p>
-                    </div>
-                </div>
-
-                <div class="bg-gray-50 p-4 rounded-lg">
-                    <h3 class="text-lg font-semibold mb-2">Detection Settings</h3>
-                    <form id="detection-settings" class="space-y-4">
-                        <div>
-                            <label for="confidence-threshold" class="block text-sm font-medium text-gray-700">
-                                Confidence Threshold
-                            </label>
-                            <input type="range" 
-                                   id="confidence-threshold" 
-                                   name="confidence" 
-                                   min="0" 
-                                   max="100" 
-                                   value="50"
-                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                            <div class="flex justify-between text-xs text-gray-500 mt-1">
-                                <span>0%</span>
-                                <span id="confidence-value">50%</span>
-                                <span>100%</span>
-                            </div>
-                        </div>
-                    </form>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Object Detection</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        #videoFeed {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .detection-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .detection-box {
+            position: absolute;
+            border: 2px solid #00ff00;
+            border-radius: 4px;
+            padding: 2px;
+            color: #00ff00;
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 1.2em;
+            border-radius: 8px;
+        }
+        .error-message {
+            color: #dc3545;
+            text-align: center;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="text-center mb-4">Real-time Object Detection</h1>
+        
+        <div class="video-container">
+            <img id="videoFeed" src="{{ url_for('video_feed') }}" alt="Video Feed">
+            <div id="detectionOverlay" class="detection-overlay"></div>
+            <div id="loadingOverlay" class="loading-overlay">
+                <div class="spinner-border text-light" role="status">
+                    <span class="visually-hidden">Loading...</span>
                 </div>
             </div>
         </div>
 
-        <div class="mt-6 bg-white rounded-lg shadow-md p-6">
-            <h3 class="text-lg font-semibold mb-4">Recent Detections</h3>
-            <div id="recent-detections" class="space-y-2">
-                <!-- Recent detections will be populated here -->
+        <div id="errorMessage" class="error-message" style="display: none;">
+            Camera not available. Please check your camera connection and refresh the page.
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Detection Settings</h5>
+                        <div class="mb-3">
+                            <label for="confidenceThreshold" class="form-label">Confidence Threshold</label>
+                            <input type="range" class="form-range" id="confidenceThreshold" min="0" max="1" step="0.1" value="0.5">
+                            <div class="text-center" id="thresholdValue">0.5</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Latest Detection</h5>
+                        <div id="latestDetection">
+                            <p class="text-muted">No detections yet</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
-</div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    const confidenceSlider = document.getElementById('confidence-threshold');
-    const confidenceValue = document.getElementById('confidence-value');
-    const latestDetection = document.getElementById('latest-detection');
-    const recentDetections = document.getElementById('recent-detections');
-    const videoFeed = document.getElementById('video-feed');
-    const cameraLoading = document.getElementById('camera-loading');
-    const cameraError = document.getElementById('camera-error');
-    
-    // Handle video feed loading
-    videoFeed.onload = function() {
-        cameraLoading.classList.add('hidden');
-        cameraError.classList.add('hidden');
-    };
-    
-    videoFeed.onerror = function() {
-        cameraLoading.classList.add('hidden');
-        cameraError.classList.remove('hidden');
-    };
-    
-    // Update confidence threshold display
-    confidenceSlider.addEventListener('input', function() {
-        const value = this.value;
-        confidenceValue.textContent = `${value}%`;
-        
-        // Send threshold update to server
-        fetch('/update_threshold', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                threshold: value / 100
-            })
-        }).catch(error => {
-            console.error('Error updating threshold:', error);
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const videoFeed = document.getElementById('videoFeed');
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            const errorMessage = document.getElementById('errorMessage');
+            const detectionOverlay = document.getElementById('detectionOverlay');
+            const latestDetection = document.getElementById('latestDetection');
+            const confidenceThreshold = document.getElementById('confidenceThreshold');
+            const thresholdValue = document.getElementById('thresholdValue');
+
+            // Handle video feed loading
+            videoFeed.onload = function() {
+                loadingOverlay.style.display = 'none';
+                errorMessage.style.display = 'none';
+            };
+
+            videoFeed.onerror = function() {
+                loadingOverlay.style.display = 'none';
+                errorMessage.style.display = 'block';
+            };
+
+            // WebSocket connection for real-time updates
+            let ws = null;
+            function connectWebSocket() {
+                ws = new WebSocket(`ws://${window.location.host}/ws/detection`);
+                
+                ws.onmessage = function(event) {
+                    const detection = JSON.parse(event.data);
+                    updateLatestDetection(detection);
+                };
+
+                ws.onclose = function() {
+                    console.log('WebSocket connection closed');
+                    setTimeout(connectWebSocket, 1000); // Reconnect after 1 second
+                };
+            }
+
+            function updateLatestDetection(detection) {
+                const confidence = (detection.confidence * 100).toFixed(1);
+                latestDetection.innerHTML = `
+                    <p><strong>Object:</strong> ${detection.object_name}</p>
+                    <p><strong>Confidence:</strong> ${confidence}%</p>
+                    <p><strong>Time:</strong> ${new Date(detection.timestamp).toLocaleTimeString()}</p>
+                `;
+            }
+
+            // Confidence threshold handling
+            confidenceThreshold.addEventListener('input', function() {
+                const value = this.value;
+                thresholdValue.textContent = value;
+                
+                fetch('/update_threshold', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ threshold: value })
+                })
+                .catch(error => console.error('Error updating threshold:', error));
+            });
+
+            // Initialize WebSocket connection
+            connectWebSocket();
         });
-    });
-
-    // WebSocket connection for real-time updates
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/detection`);
-    
-    ws.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        
-        // Update latest detection
-        latestDetection.innerHTML = `
-            <div class="space-y-1">
-                <p class="font-medium">${data.object_name}</p>
-                <p class="text-sm">Confidence: ${(data.confidence * 100).toFixed(1)}%</p>
-                <p class="text-xs text-gray-500">${new Date(data.timestamp).toLocaleTimeString()}</p>
-            </div>
-        `;
-
-        // Add to recent detections
-        const detectionElement = document.createElement('div');
-        detectionElement.className = 'p-2 bg-gray-50 rounded';
-        detectionElement.innerHTML = `
-            <div class="flex justify-between items-center">
-                <div>
-                    <span class="font-medium">${data.object_name}</span>
-                    <span class="text-sm text-gray-500 ml-2">${(data.confidence * 100).toFixed(1)}%</span>
-                </div>
-                <span class="text-xs text-gray-500">${new Date(data.timestamp).toLocaleTimeString()}</span>
-            </div>
-        `;
-        
-        recentDetections.insertBefore(detectionElement, recentDetections.firstChild);
-        
-        // Keep only last 5 detections
-        if (recentDetections.children.length > 5) {
-            recentDetections.removeChild(recentDetections.lastChild);
-        }
-    };
-
-    ws.onerror = function(error) {
-        console.error('WebSocket error:', error);
-        cameraError.classList.remove('hidden');
-    };
-
-    ws.onclose = function() {
-        console.log('WebSocket connection closed');
-        cameraError.classList.remove('hidden');
-    };
-});
-</script>
+    </script>
+</body>
+</html>
 {% endblock %} 
