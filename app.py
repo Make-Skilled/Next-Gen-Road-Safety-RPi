@@ -86,38 +86,75 @@ def check_system_resources():
     return True
 
 def init_camera():
+    """Initialize camera if not already initialized"""
     global camera
-    if camera is None:
-        camera = cv2.VideoCapture(0,cv2.CAP_V4L2)
+    try:
+        if camera is not None:
+            # Camera already initialized
+            return True
+            
+        print("Initializing camera...")
+        camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        if not camera.isOpened():
+            print("Failed to open camera")
+            return False
+            
+        # Configure camera settings
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         camera.set(cv2.CAP_PROP_FPS, 15)
         camera.set(cv2.CAP_PROP_BUFFERSIZE, 3)
         camera.set(cv2.CAP_PROP_AUTOFOCUS, 0)
         camera.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        print("Camera initialized successfully")
+        return True
+    except Exception as e:
+        print(f"Error initializing camera: {e}")
+        return False
 
 def release_camera():
+    """Release camera resources"""
     global camera
-    if camera is not None:
-        camera.release()
-        camera = None
+    try:
+        if camera is not None:
+            print("Releasing camera...")
+            camera.release()
+            camera = None
+            print("Camera released successfully")
+    except Exception as e:
+        print(f"Error releasing camera: {e}")
 
 def camera_thread():
     """Thread for capturing camera frames"""
     global latest_frame, camera
-    try:
-        init_camera()
-        while True:
-            ret, frame = camera.read()
-            if ret:
+    retry_count = 0
+    max_retries = 3
+    
+    while True:
+        try:
+            if not init_camera():
+                retry_count += 1
+                if retry_count >= max_retries:
+                    print("Failed to initialize camera after multiple attempts")
+                    time.sleep(5)  # Wait before retrying
+                    retry_count = 0
+                continue
+                
+            while camera is not None:
+                ret, frame = camera.read()
+                if not ret:
+                    print("Failed to read frame")
+                    break
+                    
                 frame = cv2.flip(frame, 1)  # Flip for selfie view
                 with frame_lock:
                     latest_frame = frame.copy()
-            time.sleep(0.01)  # Small delay to prevent CPU overload
-    except Exception as e:
-        print(f"Error in camera thread: {e}")
-    finally:
-        release_camera()
+                time.sleep(0.01)  # Small delay to prevent CPU overload
+                
+        except Exception as e:
+            print(f"Error in camera thread: {e}")
+            release_camera()  # Release camera on error
+            time.sleep(1)  # Wait before retrying
 
 def detection_thread():
     """Thread for object detection"""
@@ -373,4 +410,4 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()
     start_threads()  # Start the threads
-    app.run(host='0.0.0.0', port=5000, debug=True) 
+    app.run(host='0.0.0.0', port=5000, debug=False)  # Disable debug mode to prevent reloading 
