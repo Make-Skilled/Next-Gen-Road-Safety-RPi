@@ -182,16 +182,19 @@ def detection_thread():
             
             # Process frame
             try:
-                # Resize frame for faster processing - more aggressive downscaling
-                height, width = frame.shape[:2]
-                detection_size = 128  # Reduced detection size for speed
-                frame_resized = cv2.resize(frame, (detection_size, detection_size))
+                # Ensure frame is valid before processing
+                if frame is None or frame.size == 0:
+                    continue
                 
-                # Convert to float16 for faster processing
-                frame_resized = frame_resized.astype(np.float16)
+                # Get original dimensions
+                height, width = frame.shape[:2]
+                
+                # Resize frame for detection - use standard dimensions
+                detection_size = (192, 192)  # Changed to tuple for cv2.resize
+                frame_resized = cv2.resize(frame, detection_size, interpolation=cv2.INTER_LINEAR)
                 
                 # Run detection with optimized parameters
-                results = model(frame_resized, conf=confidence_threshold, verbose=False, half=True)[0]
+                results = model(frame_resized, conf=confidence_threshold, verbose=False)[0]
                 
                 # Process detections
                 detections = []
@@ -205,26 +208,39 @@ def detection_thread():
                     confs = boxes.conf.cpu().numpy()
                     class_ids = boxes.cls.cpu().numpy().astype(int)
                     
-                    # Scale all coordinates at once
-                    scale_x = width / detection_size
-                    scale_y = height / detection_size
+                    # Scale coordinates back to original size
+                    scale_x = width / detection_size[0]
+                    scale_y = height / detection_size[1]
                     coords[:, [0, 2]] *= scale_x
                     coords[:, [1, 3]] *= scale_y
                     coords = coords.astype(int)
                     
-                    # Draw all boxes at once using vectorized operations
+                    # Process each detection
                     for i in range(len(boxes)):
                         x1, y1, x2, y2 = coords[i]
                         confidence = float(confs[i])
                         class_name = results.names[class_ids[i]]
                         
-                        # Only draw if confidence is high enough
+                        # Only process high confidence detections
                         if confidence >= confidence_threshold:
-                            # Simplified drawing for speed
-                            cv2.rectangle(processed_frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
-                            label = f"{class_name}:{confidence:.1f}"
-                            cv2.putText(processed_frame, label, (x1, y1 - 5), 
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                            # Draw bounding box
+                            cv2.rectangle(processed_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            
+                            # Add label with confidence
+                            label = f"{class_name}: {confidence:.2f}"
+                            label_size, baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
+                            y1_label = max(y1, label_size[1])
+                            
+                            # Draw label background
+                            cv2.rectangle(processed_frame, 
+                                        (x1, y1_label - label_size[1] - 10),
+                                        (x1 + label_size[0], y1_label),
+                                        (0, 255, 0), -1)
+                            
+                            # Draw label text
+                            cv2.putText(processed_frame, label,
+                                      (x1, y1_label - 5),
+                                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
                             
                             detections.append({
                                 'object_name': class_name,
@@ -239,7 +255,7 @@ def detection_thread():
                 with processed_frame_lock:
                     latest_processed_frame = processed_frame
                 
-                # Save to database less frequently (every 2 seconds)
+                # Save to database less frequently
                 if detections and time.time() - last_processing_time > 2.0:
                     with app.app_context():
                         for detection in detections:
@@ -254,6 +270,8 @@ def detection_thread():
                 
             except Exception as e:
                 print(f"Error processing detection: {e}")
+                import traceback
+                print(traceback.format_exc())  # Print full error traceback
             
             time.sleep(0.01)
             
