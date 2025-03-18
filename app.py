@@ -51,7 +51,7 @@ def init_camera():
             camera.release()
             time.sleep(1)
         
-        camera = cv2.VideoCapture(0)
+        camera = cv2.VideoCapture(0,cv2.CAP_V4L2)
         
         if not camera.isOpened():
             raise Exception("Failed to open camera")
@@ -234,6 +234,8 @@ def index():
     global camera_initialized
     if not camera_initialized:
         flash('Camera not available. Please check your camera connection.')
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
     return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -307,15 +309,6 @@ def update_threshold():
     data = request.get_json()
     confidence_threshold = float(data.get('threshold', 0.5))
     return jsonify({'status': 'success'})
-
-@app.route('/detect')
-@login_required
-def detect():
-    global camera_initialized
-    if not camera_initialized:
-        flash('Camera not available. Please check your camera connection.')
-        return redirect(url_for('index'))
-    return render_template('detect.html')
 
 if __name__ == '__main__':
     with app.app_context():

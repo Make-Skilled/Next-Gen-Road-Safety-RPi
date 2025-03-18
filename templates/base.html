@@ -16,7 +16,7 @@
             <div class="space-x-4">
                 {% if current_user.is_authenticated %}
                     <a href="{{ url_for('dashboard') }}" class="hover:text-gray-200">Dashboard</a>
-                    <a href="{{ url_for('detect') }}" class="hover:text-gray-200">Detect</a>
+                    <a href="{{ url_for('dashboard') }}" class="hover:text-gray-200">Detect</a>
                     <a href="{{ url_for('logout') }}" class="hover:text-gray-200">Logout</a>
                 {% else %}
                     <a href="{{ url_for('login') }}" class="hover:text-gray-200">Login</a>
