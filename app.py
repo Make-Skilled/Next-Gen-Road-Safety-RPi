@@ -43,67 +43,82 @@ labels = load_labels()
 
 def detect_objects(frame):
     if frame is None:
+        print("Frame is None in detect_objects")
         return None, []
         
     height, width = frame.shape[:2]
+    print(f"Processing frame of size: {width}x{height}")
     
-    # Create blob from image
-    blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
-    net.setInput(blob)
-    
-    # Get output layer names
-    layer_names = net.getLayerNames()
-    output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
-    
-    # Forward pass
-    outputs = net.forward(output_layers)
-    
-    # Initialize lists for detected objects
-    boxes = []
-    confidences = []
-    class_ids = []
-    
-    # Process each output
-    for output in outputs:
-        for detection in output:
-            scores = detection[5:]
-            class_id = np.argmax(scores)
-            confidence = scores[class_id]
-            
-            if confidence > confidence_threshold:
-                # Scale bounding box coordinates back relative to size of image
-                box = detection[0:4] * np.array([width, height, width, height])
-                (centerX, centerY, width, height) = box.astype("int")
+    try:
+        # Create blob from image
+        blob = cv2.dnn.blobFromImage(frame, 1/255.0, (416, 416), swapRB=True, crop=False)
+        print("Created blob successfully")
+        
+        net.setInput(blob)
+        print("Set input to network")
+        
+        # Get output layer names
+        layer_names = net.getLayerNames()
+        output_layers = [layer_names[i - 1] for i in net.getUnconnectedOutLayers()]
+        print(f"Output layers: {output_layers}")
+        
+        # Forward pass
+        outputs = net.forward(output_layers)
+        print(f"Forward pass completed. Number of outputs: {len(outputs)}")
+        
+        # Initialize lists for detected objects
+        boxes = []
+        confidences = []
+        class_ids = []
+        
+        # Process each output
+        for output in outputs:
+            for detection in output:
+                scores = detection[5:]
+                class_id = np.argmax(scores)
+                confidence = scores[class_id]
                 
-                # Use center coordinates to derive top and left corner of bounding box
-                x = int(centerX - (width / 2))
-                y = int(centerY - (height / 2))
+                if confidence > confidence_threshold:
+                    # Scale bounding box coordinates back relative to size of image
+                    box = detection[0:4] * np.array([width, height, width, height])
+                    (centerX, centerY, width, height) = box.astype("int")
+                    
+                    # Use center coordinates to derive top and left corner of bounding box
+                    x = int(centerX - (width / 2))
+                    y = int(centerY - (height / 2))
+                    
+                    boxes.append([x, y, int(width), int(height)])
+                    confidences.append(float(confidence))
+                    class_ids.append(class_id)
+        
+        print(f"Found {len(boxes)} potential detections")
+        
+        # Apply non-maxima suppression
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, confidence_threshold, nms_threshold)
+        print(f"After NMS: {len(indices)} detections")
+        
+        detections = []
+        if len(indices) > 0:
+            for i in indices.flatten():
+                detection = {
+                    'object_name': labels[class_ids[i]],
+                    'confidence': confidences[i],
+                    'box': boxes[i],
+                    'timestamp': datetime.datetime.now()
+                }
+                detections.append(detection)
                 
-                boxes.append([x, y, int(width), int(height)])
-                confidences.append(float(confidence))
-                class_ids.append(class_id)
-    
-    # Apply non-maxima suppression
-    indices = cv2.dnn.NMSBoxes(boxes, confidences, confidence_threshold, nms_threshold)
-    
-    detections = []
-    if len(indices) > 0:
-        for i in indices.flatten():
-            detection = {
-                'object_name': labels[class_ids[i]],
-                'confidence': confidences[i],
-                'box': boxes[i],
-                'timestamp': datetime.datetime.now()
-            }
-            detections.append(detection)
-            
-            # Draw bounding box and label on frame
-            (x, y, w, h) = boxes[i]
-            label = f"{labels[class_ids[i]]}: {confidences[i]:.2f}"
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-    
-    return frame, detections
+                # Draw bounding box and label on frame
+                (x, y, w, h) = boxes[i]
+                label = f"{labels[class_ids[i]]}: {confidences[i]:.2f}"
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(frame, label, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        return frame, detections
+        
+    except Exception as e:
+        print(f"Error in detect_objects: {e}")
+        return frame, []
 
 def get_camera_frame():
     try:
@@ -127,11 +142,14 @@ def get_camera_frame():
             print("Failed to read frame")
             return None, []
             
+        print("Frame captured successfully")
+            
         # Flip the frame horizontally for a later selfie-view display
         frame = cv2.flip(frame, 1)
         
         # Detect objects
         frame, detections = detect_objects(frame)
+        print(f"Number of detections: {len(detections)}")
         return frame, detections
         
     except Exception as e:
