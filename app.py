@@ -231,9 +231,6 @@ def load_user(user_id):
 
 @app.route('/')
 def index():
-    global camera_initialized
-    if not camera_initialized:
-        flash('Camera not available. Please check your camera connection.')
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
     return render_template('index.html')
@@ -280,10 +277,6 @@ def signup():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    global camera_initialized
-    if not camera_initialized:
-        flash('Camera not available. Please check your camera connection.')
-        return redirect(url_for('index'))
     detections = Detection.query.filter_by(user_id=current_user.id).order_by(Detection.timestamp.desc()).all()
     return render_template('dashboard.html', detections=detections)
 
@@ -296,7 +289,6 @@ def logout():
 @app.route('/video_feed')
 @login_required
 def video_feed():
-    global camera_initialized
     if not camera_initialized:
         return "Camera not available", 503
     return Response(gen_frames(),
