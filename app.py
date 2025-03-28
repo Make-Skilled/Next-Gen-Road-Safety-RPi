@@ -12,6 +12,7 @@ import time
 import threading
 import atexit
 import psutil
+import pyttsx3
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -75,6 +76,33 @@ def load_labels():
         return ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light']
 
 labels = load_labels()
+
+# Initialize text-to-speech engine
+try:
+    engine = pyttsx3.init()
+    # Set properties for better voice output
+    engine.setProperty('rate', 150)    # Speed of speech
+    engine.setProperty('volume', 0.9)  # Volume (0.0 to 1.0)
+    print("Text-to-speech engine initialized successfully")
+except Exception as e:
+    print(f"Error initializing text-to-speech engine: {e}")
+    engine = None
+
+def speak_detection(object_name, confidence):
+    """Speak the detected object and its confidence"""
+    if engine is None:
+        return
+        
+    try:
+        # Format the message
+        confidence_percent = int(confidence * 100)
+        message = f"Detected {object_name} with {confidence_percent}% confidence"
+        
+        # Speak the message
+        engine.say(message)
+        engine.runAndWait()
+    except Exception as e:
+        print(f"Error in text-to-speech: {e}")
 
 def check_system_resources():
     """Check if system has enough resources to process frame"""
@@ -169,6 +197,9 @@ def detection_thread():
     except Exception as e:
         print(f"Error getting default user: {e}")
     
+    last_spoken_time = 0
+    min_speech_interval = 2.0  # Minimum time between speech outputs
+    
     while True:
         try:
             if not detection_enabled:
@@ -258,6 +289,11 @@ def detection_thread():
                                 'box': [x1, y1, x2 - x1, y2 - y1],
                                 'timestamp': datetime.datetime.now()
                             })
+                            
+                            # Speak detection if enough time has passed
+                            if current_time - last_spoken_time >= min_speech_interval:
+                                speak_detection(class_name, confidence)
+                                last_spoken_time = current_time
                 
                 # Update latest detections and processed frame
                 with detection_lock:
